@@ -1,6 +1,8 @@
 import os
 
 
+# Buscar archivo en múltiples ubicaciones, antes habia mas lugares y las rutas eran mas complicadas
+# Se dejo por simplicidad y para evitar errores
 def buscar_archivo_desesperadamente(nombre):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     lugares = [
