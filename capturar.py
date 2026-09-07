@@ -3,34 +3,19 @@ import numpy as np
 import os
 import time
 
-from Herramientas import BACKEND_CAMARA, CHECKERBOARD, FLAGS_TABLERO
+from Herramientas import (BACKEND_CAMARA, CHECKERBOARD, MIN_ANCHO_TABLERO,
+                          detectar_tablero, tamano_relativo)
 
 # === CONFIGURACIÓN ===
-# Buscamos la ruta donde está ESTE archivo .py
+# Busco la ruta donde está ESTE archivo .py
 CARPETA_BASE = os.path.dirname(os.path.abspath(__file__))
-# Creamos la carpeta de fotos AQUÍ MISMO
+# Creo la carpeta de fotos AQUÍ MISMO
 CARPETA_GUARDADO = os.path.join(CARPETA_BASE, "capturas")
 
 INTERVALO_SEGUNDOS = 2.0
 TOTAL_FOTOS = 30
 
-# Fraccion minima del ancho del cuadro que debe ocupar el tablero.
-# Es un piso grueso, no una garantia: capturas al 9% del ancho dieron una
-# calibracion inservible (focal de 1515 px, o sea 24 grados de campo de vision,
-# implausible para una webcam). Lo que de verdad condiciona bien el sistema es
-# VARIAR LA INCLINACION del tablero, no su tamano en el cuadro; el tamano solo
-# ayuda a localizar mejor las esquinas.
-# La verificacion real es a posteriori: que el fx resultante corresponda a un
-# campo de vision creible para la camara.
-MIN_ANCHO_TABLERO = 0.15
-
-
-def ancho_relativo(esquinas, ancho_img):
-    """Ancho del tablero detectado como fraccion del ancho de la imagen."""
-    p = esquinas.reshape(-1, 2)
-    return float(np.ptp(p[:, 0])) / ancho_img
-
-if not os.path.exists(CARPETA_GUARDADO): 
+if not os.path.exists(CARPETA_GUARDADO):
     os.makedirs(CARPETA_GUARDADO)
     print(f"✅ Carpeta de fotos creada en: {CARPETA_GUARDADO}")
 
@@ -59,15 +44,15 @@ while contador < TOTAL_FOTOS:
     gray0 = cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY)
     gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
 
-    found0, corners0 = cv2.findChessboardCorners(gray0, CHECKERBOARD, FLAGS_TABLERO)
-    found1, corners1 = cv2.findChessboardCorners(gray1, CHECKERBOARD, FLAGS_TABLERO)
+    found0, corners0 = detectar_tablero(gray0)
+    found1, corners1 = detectar_tablero(gray1)
 
     if found0: cv2.drawChessboardCorners(show0, CHECKERBOARD, corners0, found0)
     if found1: cv2.drawChessboardCorners(show1, CHECKERBOARD, corners1, found1)
 
     # Que tan grande se ve el tablero en cada camara
-    ancho0 = ancho_relativo(corners0, frame0.shape[1]) if found0 else 0.0
-    ancho1 = ancho_relativo(corners1, frame1.shape[1]) if found1 else 0.0
+    ancho0 = tamano_relativo(corners0, frame0.shape) if found0 else 0.0
+    ancho1 = tamano_relativo(corners1, frame1.shape) if found1 else 0.0
     cerca = ancho0 >= MIN_ANCHO_TABLERO and ancho1 >= MIN_ANCHO_TABLERO
 
     guardada = False
@@ -103,7 +88,7 @@ while contador < TOTAL_FOTOS:
             txt, col = (f"{etiqueta}: {anc*100:.0f}% - ACERCALO "
                         f"(min {MIN_ANCHO_TABLERO*100:.0f}%)"), (0, 165, 255)
         else:
-            txt, col = f"{etiqueta}: {anc*100:.0f}% del ancho - bien", (0, 255, 0)
+            txt, col = f"{etiqueta}: {anc*100:.0f}% del cuadro - bien", (0, 255, 0)
         cv2.putText(v, txt, (8, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.52, col, 1)
         vistas.append(v)
 

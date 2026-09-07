@@ -20,12 +20,75 @@ CHECKERBOARD = (7, 7)
 
 # Flags de deteccion del tablero, los del ejemplo canonico de OpenCV.
 # ADAPTIVE_THRESH umbraliza por regiones y NORMALIZE_IMAGE ecualiza el
-# histograma antes de buscar. Ojo: OpenCV 4.x ya prueba varios umbrales por su
+# histograma antes de buscar. Aclaro: OpenCV 4.x ya prueba varios umbrales por su
 # cuenta, asi que con flags=0 detecta casi igual; estos estan explicitos por
 # claridad, no porque arreglen un caso medido.
 # capturar.py detecta para decidir si guarda la foto y generar_calibracion.py
 # vuelve a detectar sobre esa misma foto, asi que ambos usan los mismos flags.
 FLAGS_TABLERO = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+
+# Refinacion subpixel para el detector clasico (SB ya devuelve subpixel).
+CRITERIA_SUBPIX = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001)
+
+# Fraccion minima del cuadro que debe ocupar el tablero para que capturar.py
+# guarde la foto. Es un piso grueso, no una garantia: capturas al 9% dieron una
+# calibracion inservible (focal de 1515 px, o sea 24 grados de campo de vision,
+# implausible para una webcam). Lo que de verdad condiciona bien el sistema es
+# VARIAR LA INCLINACION del tablero, no su tamano en el cuadro; el tamano solo
+# ayuda a localizar mejor las esquinas. La verificacion real es a posteriori:
+# que el fx resultante corresponda a un campo de vision creible.
+# Es una perilla: si mi camara no logra enfocar el tablero tan cerca, la bajo a
+# 0.10 en vez de quedarme sin capturar. El chequeo de campo de vision al final
+# de generar_calibracion.py avisa si quedo mal condicionada.
+MIN_ANCHO_TABLERO = 0.15
+
+
+def tamano_relativo(esquinas, forma_img):
+    """Que tan grande se ve el tablero, como fraccion del cuadro.
+
+    Se toma el MAYOR de los dos spans (horizontal sobre el ancho, vertical
+    sobre el alto), no solo el horizontal: inclinar el tablero sobre el eje
+    vertical comprime su span en X aunque el tablero este igual de cerca.
+    Midiendo solo en X, capturar.py pedia inclinar el tablero y a la vez
+    castigaba haberlo inclinado: el tablero se detectaba perfecto y la barra
+    seguia diciendo ACERCALO. Cada inclinacion conserva al menos uno de los
+    dos ejes, asi que el mayor de los dos no se cae al inclinar.
+
+    forma_img es frame.shape (alto, ancho, ...).
+    """
+    alto_img, ancho_img = forma_img[:2]
+    p = esquinas.reshape(-1, 2)
+    return max(float(np.ptp(p[:, 0])) / ancho_img,
+               float(np.ptp(p[:, 1])) / alto_img)
+
+
+def detectar_tablero(gris, tablero=CHECKERBOARD):
+    """Detecta el tablero. Devuelve (encontrado, esquinas) ya en subpixel.
+
+    Intenta primero findChessboardCornersSB, que localiza las esquinas con
+    mejor precision subpixel que findChessboardCorners + cornerSubPix y no
+    necesita margen blanco alrededor del tablero. Si SB no encuentra nada, cae
+    al detector clasico + cornerSubPix, asi que solo puede detectar un
+    superconjunto de lo que detectaba antes: ninguna captura que antes
+    funcionaba se pierde.
+
+    NOTA: con imagenes sinteticas (desenfoque, perspectiva fuerte, tablero sin
+    margen) los dos detectores dieron el mismo resultado, asi que la ventaja de
+    SB con imagenes reales aqui no esta medida, solo es la recomendada por
+    OpenCV. El fallback es lo que hace seguro el cambio.
+
+    capturar.py detecta para decidir si guarda la foto y generar_calibracion.py
+    vuelve a detectar sobre esa misma foto: los dos pasan por aqui para que no
+    puedan desincronizarse.
+    """
+    ok, esquinas = cv2.findChessboardCornersSB(gris, tablero, cv2.CALIB_CB_NORMALIZE_IMAGE)
+    if ok:
+        return True, esquinas
+
+    ok, esquinas = cv2.findChessboardCorners(gris, tablero, FLAGS_TABLERO)
+    if not ok:
+        return False, None
+    return True, cv2.cornerSubPix(gris, esquinas, (11, 11), (-1, -1), CRITERIA_SUBPIX)
 
 
 def ordenar_esquinas(esquinas, tablero=CHECKERBOARD):
@@ -61,8 +124,8 @@ def ordenar_esquinas(esquinas, tablero=CHECKERBOARD):
     return np.ascontiguousarray(mejor.reshape(-1, 1, 2))
 
 
-# Buscar archivo en múltiples ubicaciones, antes habia mas lugares y las rutas eran mas complicadas
-# Se dejo por simplicidad y para evitar errores
+# Busco el archivo en múltiples ubicaciones, antes habia mas lugares y las rutas eran mas complicadas
+# Lo deje asi por simplicidad y para evitar errores
 def buscar_archivo_desesperadamente(nombre):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     lugares = [

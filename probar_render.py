@@ -90,8 +90,8 @@ def main():
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        # Gira el cuerpo sobre su propio eje vertical: si se ve la profundidad
-        # cambiar al girar, la reconstruccion 3D se esta dibujando de verdad.
+        # Giro el cuerpo sobre su propio eje vertical: si la profundidad cambia
+        # al girar, la reconstruccion 3D se esta dibujando de verdad.
         glPushMatrix()
         glTranslatef(cx, cy, cz)
         glRotatef(angulo, 0, 1, 0)

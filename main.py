@@ -8,7 +8,7 @@ import numpy as np
 import json
 import sys
 
-# === Importamos los archivos ===
+# === Importo los archivos ===
 from Herramientas import buscar_archivo_desesperadamente, BACKEND_CAMARA
 from Graficos import dibujar_hueso, dibujar_joint, dibujar_cabeza
 
@@ -26,9 +26,9 @@ def main():
 
 # Color por defecto por si acaso no hay una configuracion previa
     color_final = (0.2, 0.6, 1.0) 
-    # Intentar cargar la configuracion del avatar
+    # Intento cargar la configuracion del avatar
     cfg = buscar_archivo_desesperadamente("avatar_config.json")
-    # Si existe, cargar el color de piel
+    # Si existe, cargo el color de piel
     if cfg:
         try:
             with open(cfg) as f:
@@ -37,7 +37,7 @@ def main():
                 color_final = tuple(int(h[i:i+2], 16)/255.0 for i in (0,2,4))
         except: pass
 
-        # Inicializar Pygame y OpenGL
+        # Inicializo Pygame y OpenGL
 
     pygame.init()
     pygame.display.set_mode((1000, 800), DOUBLEBUF | OPENGL)
@@ -60,10 +60,10 @@ def main():
     elevacion = 0.0    # grados sobre el horizonte
     distancia = 900.0  # unidades de la camara virtual al centro del avatar
 
-    #  Establece la confianza mínima (0.1) que un punto corporal detectado por MediaPipe debe tener en ambas cámaras para ser considerado válido y usado en la reconstrucción 3D.
+    #  Establezco la confianza mínima (0.1) que un punto corporal detectado por MediaPipe debe tener en ambas cámaras para ser considerado válido y usado en la reconstrucción 3D.
     TOLERANCIA_VISIBILIDAD = 0.1 
 
-# Configurar MediaPipe Pose y las cámaras
+# Configuro MediaPipe Pose y las cámaras
     mp_pose = mp.solutions.pose
     mp_draw = mp.solutions.drawing_utils  # para dibujar los puntos sobre el preview
     pose0 = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, model_complexity=0)
@@ -77,7 +77,7 @@ def main():
     #Esto es para ver el avatar mas grande en la pantalla
     ESCALA_GIGANTE = 1.5
 
-    # Definir las conexiones entre los puntos del cuerpo para dibujar el esqueleto estos puntos son los mismos que usa mediapipe y son universales 
+    # Defino las conexiones entre los puntos del cuerpo para dibujar el esqueleto estos puntos son los mismos que usa mediapipe y son universales 
     CONEXIONES = [(11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)]
 
     # Distancia real del sujeto a las camaras, en mm. Se muestra en pantalla
@@ -88,14 +88,14 @@ def main():
 
     # Bucle principal
     while True:
-        # Manejar eventos de Pygame
+        # Manejo los eventos de Pygame
         for event in pygame.event.get():
 
             if event.type == QUIT: pygame.quit(); return
             if event.type == KEYDOWN and event.key == K_ESCAPE:
                 pygame.quit(); return
 
-        # Girar la vista con las flechas, acercar y alejar con Z y X
+        # Giro la vista con las flechas, acerco y alejo con Z y X
         teclas = pygame.key.get_pressed()
         if teclas[K_LEFT]:  orbita -= 1.6
         if teclas[K_RIGHT]: orbita += 1.6
@@ -107,37 +107,37 @@ def main():
             orbita, elevacion, distancia = 180.0, 0.0, 900.0
             pivote = None   # vuelve a anclar donde este el sujeto ahora
 
-# Leer cuadros de ambas cámaras
+# Leo los cuadros de ambas cámaras
         ret0, frame0 = cap0.read(); ret1, frame1 = cap1.read()
         if not ret0 or not ret1: continue
 
-# Procesar con MediaPipe Pose
+# Proceso con MediaPipe Pose
         res0 = pose0.process(cv2.cvtColor(frame0, cv2.COLOR_BGR2RGB))
         res1 = pose1.process(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB))
         
-        # Limpiar pantalla OpenGL
+        # Limpio la pantalla OpenGL
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-# Reconstruir y dibujar el esqueleto 3D
+# Reconstruyo y dibujo el esqueleto 3D
         if res0.pose_landmarks and res1.pose_landmarks:
             
             lm0, lm1 = res0.pose_landmarks.landmark, res1.pose_landmarks.landmark
-            # Obtener puntos visibles en ambas cámaras
+            # Obtengo los puntos visibles en ambas cámaras
             ptsL, ptsR, v_ids = [], [], []
             # Cada camara puede tener resolucion distinta, asi que los landmarks
             # normalizados (0-1) de cada una se escalan con SUS propias medidas.
             h0, w0 = frame0.shape[:2]
             h1, w1 = frame1.shape[:2]
 
-            #Evaluar los 33 puntos de referencia del cuerpo
+            #Evaluo los 33 puntos de referencia del cuerpo
             for i in range(33):
-                # Verificar visibilidad en ambas cámaras, Si ambos puntos son visibles, agregar a la lista
+                # Verifico visibilidad en ambas cámaras, si ambos puntos son visibles los agrego a la lista
                 if lm0[i].visibility > TOLERANCIA_VISIBILIDAD and lm1[i].visibility > TOLERANCIA_VISIBILIDAD:
                     ptsL.append([lm0[i].x * w0, lm0[i].y * h0])
                     ptsR.append([lm1[i].x * w1, lm1[i].y * h1])
                     v_ids.append(i)
             
-            # Triangular puntos 3D si hay puntos visibles
+            # Triangulo los puntos 3D si hay puntos visibles
             if ptsL:
                 p3d = cv2.triangulatePoints(PL, PR, np.array(ptsL).T, np.array(ptsR).T)
                 p3d = (p3d[:3] / p3d[3]).T
@@ -146,17 +146,17 @@ def main():
                 # la Z de la triangulacion esta en milimetros del mundo.
                 dist_camara = float(np.median(p3d[:, 2]))
 
-                # Escalar el modelo 3D para una mejor visualización
+                # Escalo el modelo 3D para una mejor visualización
                 p3d = p3d * ESCALA_GIGANTE
 
-# Preparar puntos finales para dibujar
+# Preparo los puntos finales para dibujar
                 final_pts = {vid: [p[0], -p[1], p[2]] for vid, p in zip(v_ids, p3d)}
 
                 # El pivote de la vista se fija UNA vez, en el primer cuerpo
                 # reconstruido, y se queda anclado a ese punto de la sala.
                 # Si siguiera al avatar, este quedaria siempre al centro de la
                 # pantalla y moverse en profundidad no se veria: justo lo que
-                # hay que demostrar.
+                # quiero demostrar.
                 if pivote is None:
                     pivote = np.mean(list(final_pts.values()), axis=0)
 
@@ -166,22 +166,22 @@ def main():
                 glRotatef(orbita, 0, 1, 0)
                 glTranslatef(-pivote[0], -pivote[1], -pivote[2])
 
-                # Dibujar esqueleto 3D en OpenGL
+                # Dibujo el esqueleto 3D en OpenGL
                 for a, b in CONEXIONES:
-                    # Solo dibujar si ambos puntos están disponibles
+                    # Solo dibujo si ambos puntos están disponibles
                     if a in final_pts and b in final_pts: 
                         dibujar_hueso(final_pts[a], final_pts[b], color_final)
                         dibujar_joint(final_pts[a], color_final)
                         dibujar_joint(final_pts[b], color_final)
                 
-                # Dibujar cabeza si el punto 0 (nariz) está disponible
+                # Dibujo la cabeza si el punto 0 (nariz) está disponible
                 if 0 in final_pts: 
                     dibujar_cabeza(final_pts[0], color_final)
 
-# Actualizar pantalla
+# Actualizo la pantalla
         pygame.display.flip()
         #Esta es la ventana de opengl donde se ve el avatar
-# Mostrar AMBAS camaras con los puntos detectados encima.
+# Muestro AMBAS camaras con los puntos detectados encima.
 # Sin esto no hay forma de saber cual de las dos no esta detectando: el avatar
 # 3D solo se dibuja si ambas ven a la persona, asi que una sola camara fallando
 # deja la ventana de OpenGL en negro sin explicar por que.
@@ -214,7 +214,7 @@ def main():
         cv2.imshow("Camaras", np.vstack([barra, panel]))
         if cv2.waitKey(1) & 0xFF == 27: break
 
-        # Salir con la tecla ESC
+        # Salgo con la tecla ESC
         
     cap0.release(); cap1.release(); pygame.quit()
 

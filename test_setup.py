@@ -103,6 +103,66 @@ def test_ordenar_esquinas_resuelve_la_ambiguedad():
                        ordenar_esquinas(vuelta, (C2, R2))), "rectangular no se normaliza"
 
 
+def test_tamano_del_tablero_sobrevive_la_inclinacion():
+    """Un tablero inclinado esta igual de cerca, y debe medirse igual de cerca.
+
+    capturar.py pide inclinar el tablero (es lo que condiciona la calibracion)
+    pero medía el tamano solo como span horizontal, que la inclinacion sobre el
+    eje vertical comprime. Con eso el tablero se detectaba perfecto y la barra
+    seguia diciendo ACERCALO, sin forma de satisfacer las dos cosas.
+    """
+    import numpy as np
+    from Herramientas import MIN_ANCHO_TABLERO, tamano_relativo
+
+    FORMA = (480, 640, 3)  # alto, ancho, canales: como frame.shape
+    alto, ancho = FORMA[:2]
+
+    def rejilla(esc_x, esc_y):
+        """Tablero 7x7 centrado, escalado en cada eje (esc=1.0 llena el cuadro)."""
+        xs = np.linspace(-0.5, 0.5, 7) * ancho * esc_x + ancho / 2
+        ys = np.linspace(-0.5, 0.5, 7) * alto * esc_y + alto / 2
+        return np.array([[[x, y]] for y in ys for x in xs], np.float32)
+
+    # De frente ocupando 40% del cuadro: pasa el minimo con holgura.
+    de_frente = tamano_relativo(rejilla(0.40, 0.40), FORMA)
+    assert de_frente > MIN_ANCHO_TABLERO, f"de frente al 40% dio {de_frente:.3f}"
+
+    # Inclinado 70 grados sobre el eje vertical: el span horizontal cae a
+    # cos(70)=34% del original (13% del cuadro, bajo el minimo) pero el
+    # vertical no cambia. El tablero no se alejo, asi que debe seguir pasando.
+    inclinado = tamano_relativo(rejilla(0.40 * np.cos(np.radians(70)), 0.40), FORMA)
+    assert inclinado > MIN_ANCHO_TABLERO, \
+        f"inclinar 70 grados tumba la medida a {inclinado:.3f}; volvio el bug del span en X"
+
+    # Lo mismo inclinando sobre el eje horizontal: ahora sobrevive el span en X.
+    assert tamano_relativo(rejilla(0.40, 0.40 * np.cos(np.radians(70))), FORMA) > MIN_ANCHO_TABLERO
+
+    # Y un tablero de verdad lejos sigue reprobando: el piso no se volvio inutil.
+    lejos = tamano_relativo(rejilla(0.09, 0.09), FORMA)
+    assert lejos < MIN_ANCHO_TABLERO, f"al 9% del cuadro deberia reprobar, dio {lejos:.3f}"
+
+
+def test_detectar_tablero_encuentra_las_esquinas_internas():
+    """detectar_tablero devuelve las cols*filas esquinas internas, ya en subpixel."""
+    import numpy as np
+    from Herramientas import CHECKERBOARD, detectar_tablero
+
+    cols, filas = CHECKERBOARD
+    lado = 40
+    # (cols+1) x (filas+1) cuadros producen cols x filas esquinas internas
+    patron = np.indices((filas + 1, cols + 1)).sum(axis=0) % 2
+    tablero = (np.kron(patron, np.ones((lado, lado))) * 255).astype(np.uint8)
+    tablero = cv2.copyMakeBorder(tablero, 40, 40, 40, 40, cv2.BORDER_CONSTANT, value=255)
+
+    ok, esquinas = detectar_tablero(tablero)
+    assert ok, "no detecta un tablero sintetico limpio"
+    p = esquinas.reshape(-1, 2)
+    assert p.shape[0] == cols * filas, f"esperadas {cols * filas} esquinas, dio {p.shape[0]}"
+    # Subpixel: la primera esquina interna cae en el borde del primer cuadro.
+    assert np.allclose(p.min(axis=0), [40 + lado, 40 + lado], atol=1.0), \
+        f"esquinas mal localizadas: min en {p.min(axis=0)}"
+
+
 if __name__ == "__main__":
     for nombre, fn in sorted(globals().items()):
         if nombre.startswith("test_"):

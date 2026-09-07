@@ -11,7 +11,7 @@ datos_avatar = {
     "tamano_cabeza": 1.0
 }
 
-# Cargar configuración existente si está disponible
+# Cargo la configuración existente si está disponible
 class InterfazCreador:
     def __init__(self, root):
         self.root = root
@@ -36,7 +36,7 @@ class InterfazCreador:
         tk.Button(root, text="💾 GUARDAR Y USAR", bg="green", fg="white", font=("Arial", 12, "bold"), command=self.guardar).pack(pady=10, fill=tk.X, padx=20)
 
 
-# Cambiar color de piel
+# Cambio el color de piel
     def cambiar_color(self):
         color = colorchooser.askcolor(color=self.color_actual)[1]
         if color:
@@ -44,17 +44,17 @@ class InterfazCreador:
             self.btn_color.config(bg=color)
 
 
-# Guardar configuración
+# Guardo la configuración
     def guardar(self):
         datos_avatar["nombre"] = self.var_nombre.get()
         datos_avatar["color_piel"] = self.color_actual
         
-        # Guardar en archivo JSON
+        # Guardo en archivo JSON
         base = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(base, "avatar_config.json"), "w") as f:
             json.dump(datos_avatar, f)
         
-        # Notificar al usuario
+        # Notifico al usuario
         messagebox.showinfo("Listo", "Guardado. ¡Abre el main.py!")
         self.root.destroy()
 

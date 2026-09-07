@@ -3,13 +3,13 @@ import cv2
 import os
 import sys
 
-from Herramientas import (CARPETA_CALIBRACION, CHECKERBOARD, FLAGS_TABLERO,
+from Herramientas import (CARPETA_CALIBRACION, CHECKERBOARD, detectar_tablero,
                           ordenar_esquinas)
 
 # === CONFIGURACIÓN ===
 CARPETA_BASE = os.path.dirname(os.path.abspath(__file__))
 CARPETA_FOTOS = os.path.join(CARPETA_BASE, "capturas")
-# Guardar donde main.py ya busca la calibracion, no en la raiz
+# Guardo donde main.py ya busca la calibracion, no en la raiz
 os.makedirs(CARPETA_CALIBRACION, exist_ok=True)
 ARCHIVO_FINAL = os.path.join(CARPETA_CALIBRACION, "stereo.npz")
 
@@ -24,12 +24,12 @@ criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001) # C
 
 print(f"Leyendo fotos de: {CARPETA_FOTOS}") 
 
-# Verificar que la carpeta de fotos exista
+# Verifico que la carpeta de fotos exista
 if not os.path.exists(CARPETA_FOTOS):
     print("ERROR: No existe la carpeta de fotos.")
     sys.exit()
 
-# Preparar puntos 3D del tablero de ajedrez
+# Preparo los puntos 3D del tablero de ajedrez
 objp = np.zeros((CHECKERBOARD[0]*CHECKERBOARD[1], 3), np.float32)
 objp[:,:2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
 objp = objp * TAMANO_CUADRO
@@ -48,13 +48,13 @@ def obtener_numero(nombre):
         return int(num)
     except: return -1
 
-# Obtener listas de archivos de ambas cámaras
+# Obtengo las listas de archivos de ambas cámaras
 
 todos_archivos = os.listdir(CARPETA_FOTOS)
 archivos_izq = sorted([f for f in todos_archivos if 'cam0' in f], key=obtener_numero)
 archivos_der = sorted([f for f in todos_archivos if 'cam1' in f], key=obtener_numero)
 
-# Emparejar archivos por número de indice con la función obtener_numero
+# Emparejo los archivos por número de indice con la función obtener_numero
 pares_validos = []
 for f_izq in archivos_izq:
     num = obtener_numero(f_izq)
@@ -63,13 +63,13 @@ for f_izq in archivos_izq:
         pares_validos.append((os.path.join(CARPETA_FOTOS, f_izq), 
                               os.path.join(CARPETA_FOTOS, f_der_esperado)))
 
-# Mostrar cantidad de pares encontrados
+# Muestro la cantidad de pares encontrados
 print(f"Pares encontrados: {len(pares_validos)}")
 if len(pares_validos) < 10:
     print("ERROR: Muy pocas fotos. Toma al menos 15.")
     sys.exit()
 
-    # Procesar cada par de imágenes
+    # Proceso cada par de imágenes
 
 # Cada camara tiene su propio tamano; no se asume que sean iguales.
 shape_l = shape_r = None
@@ -87,18 +87,17 @@ for img_l_path, img_r_path in pares_validos:
         shape_l = gray_l.shape[::-1]
         shape_r = gray_r.shape[::-1]
 
-    ret_l, corners_l = cv2.findChessboardCorners(gray_l, CHECKERBOARD, FLAGS_TABLERO)
-    ret_r, corners_r = cv2.findChessboardCorners(gray_r, CHECKERBOARD, FLAGS_TABLERO)
+    # detectar_tablero ya devuelve las esquinas refinadas a subpixel.
+    ret_l, corners_l = detectar_tablero(gray_l)
+    ret_r, corners_r = detectar_tablero(gray_r)
 
-# Si se encuentran las esquinas en ambas imágenes, agregarlas a la lista
+# Si se encuentran las esquinas en ambas imágenes, las agrego a la lista
     if ret_l and ret_r:
         objpoints.append(objp)
-        corners2_l = cv2.cornerSubPix(gray_l, corners_l, (11,11), (-1,-1), criteria)
-        corners2_r = cv2.cornerSubPix(gray_r, corners_r, (11,11), (-1,-1), criteria)
         # Sin esto, las dos camaras pueden numerar el mismo tablero empezando
         # por esquinas distintas y la calibracion estereo queda cruzada.
-        imgpoints_l.append(ordenar_esquinas(corners2_l))
-        imgpoints_r.append(ordenar_esquinas(corners2_r))
+        imgpoints_l.append(ordenar_esquinas(corners_l))
+        imgpoints_r.append(ordenar_esquinas(corners_r))
         origen.append(os.path.basename(img_l_path))
         print(f"OK: {os.path.basename(img_l_path)}")
 
@@ -114,7 +113,7 @@ if len(objpoints) < 10:
     print("  3. Que el tablero se vea completo y con luz en las dos camaras")
     sys.exit()
 
-# Calibrar cámaras individualmente y luego en estéreo
+# Calibro las cámaras individualmente y luego en estéreo
 
 print("Calibrando... (Espera)")
 print(f"Tamano cam0: {shape_l[0]}x{shape_l[1]}   cam1: {shape_r[0]}x{shape_r[1]}")
@@ -167,7 +166,7 @@ ret, mtx1, dist1, mtx2, dist2, R, T, E, F = cv2.stereoCalibrate(
     objpoints, imgpoints_l, imgpoints_r, mtx1, dist1, mtx2, dist2, shape_l,
     criteria=criteria, flags=flags)
 
-# Mostrar resultados
+# Muestro los resultados
 print(f"\nError RMS estereo: {ret:.3f} px  " +
       ("(bien)" if ret < 1.5 else "(ALTO: recaptura)" if ret > 2.5 else "(aceptable)"))
 
@@ -187,7 +186,7 @@ print(f"\nGeometria: separacion {baseline:.1f} mm, rotacion entre camaras {rot:.
 np.savez(ARCHIVO_FINAL, mtx1=mtx1, dist1=dist1, mtx2=mtx2, dist2=dist2, R=R, T=T)
 print(f"Guardado: {ARCHIVO_FINAL}")
 
-# Generar vista previa de rectificación
+# Genero la vista previa de rectificación
 # stereoRectify recibe un solo imageSize, asi que la vista previa solo tiene
 # sentido si las dos camaras capturan igual. La calibracion de arriba ya quedo
 # guardada y es valida con tamanos distintos; esto es solo la validacion visual.
@@ -198,32 +197,32 @@ if shape_l != shape_r:
     sys.exit()
 
 print("\nGenerando vista previa de rectificación...")
-# Calcular mapas de rectificación
+# Calculo los mapas de rectificación
 
 R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(mtx1, dist1, mtx2, dist2, shape_l, R, T)
 map1x, map1y = cv2.initUndistortRectifyMap(mtx1, dist1, R1, P1, shape_l, cv2.CV_32FC1)
 map2x, map2y = cv2.initUndistortRectifyMap(mtx2, dist2, R2, P2, shape_r, cv2.CV_32FC1)
 
-# Aplicar rectificación a un par de imágenes de ejemplo
+# Aplico la rectificación a un par de imágenes de ejemplo
 imgL = cv2.imread(pares_validos[0][0])
 imgR = cv2.imread(pares_validos[0][1])
 
-# Aplicar remapeo
+# Aplico el remapeo
 rectL = cv2.remap(imgL, map1x, map1y, cv2.INTER_LINEAR)
 rectR = cv2.remap(imgR, map2x, map2y, cv2.INTER_LINEAR)
 
-# Combinar imágenes para visualización
+# Combino las imágenes para visualización
 total_width = rectL.shape[1] + rectR.shape[1]
 height = rectL.shape[0]
 canvas = np.zeros((height, total_width, 3), dtype=np.uint8)
 canvas[:, :rectL.shape[1]] = rectL
 canvas[:, rectL.shape[1]:] = rectR
 
-# Dibujar líneas horizontales para verificar la rectificación, esto es opcional pero sirve para ver si la calibracion fue buena
+# Dibujo líneas horizontales para verificar la rectificación, esto es opcional pero sirve para ver si la calibracion fue buena
 for i in range(0, height, 30):
     cv2.line(canvas, (0, i), (total_width, i), (0, 255, 0), 1)
 
-# Mostrar la imagen combinada con líneas horizontales
+# Muestro la imagen combinada con líneas horizontales
 print("Abriendo ventana de validación (Presiona tecla para cerrar)")
 cv2.imshow("RECTIFICACION (Lineas deben ser rectas)", cv2.resize(canvas, (1000, 500)))
 cv2.waitKey(0)
