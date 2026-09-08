@@ -3,3 +3,12 @@
 # ----------------------------------
 __pycache__/
 capturas/
+
+# ----------------------------------
+# 2. Config local de cada maquina
+# ----------------------------------
+# El tablero y las camaras cambian por maquina. Commitearlo haria que un pull
+# sobreescribiera el config bueno de la otra maquina. Los defaults de
+# Herramientas.py son los valores actuales, asi que sin este archivo el
+# proyecto arranca igual.
+config.json
