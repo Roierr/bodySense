@@ -58,13 +58,21 @@ CRITERIA_SUBPIX = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.00
 # condiciona bien el sistema es VARIAR LA INCLINACION del tablero, no su tamano
 # en el cuadro. Es una perilla: si la camara no logra enfocar tan cerca, bajarla
 # a 0.10 es mejor que quedarse sin capturar.
+#
+# tablero_plegado no configura nada del sistema: recuerda si inicio.py muestra
+# el paso del tablero desplegado o en una linea. Una vez medido el tablero no
+# hay razon para volver a medirlo, y ese paso no bloquea ningun otro.
 DEFAULTS_CONFIG = {
     "checkerboard": [7, 7],
     "tamano_cuadro_mm": 20.0,
     "min_ancho_tablero": 0.15,
     "total_fotos": 30,
     "intervalo_segundos": 2.0,
+    "tablero_plegado": False,
 }
+
+# Claves que son si/no, no numeros.
+BOOLEANOS_CONFIG = ("tablero_plegado",)
 
 # Rangos plausibles. Un valor fuera de rango NO se usa: se cae al default y se
 # avisa. config.json lo escribe un menu y lo puede editar una persona a mano,
@@ -92,6 +100,16 @@ def validar_config(crudo):
             avisos.append(f"checkerboard {cb!r} invalido "
                           f"(se esperan dos enteros de 3 a 20); usando "
                           f"{DEFAULTS_CONFIG['checkerboard']}")
+
+    for clave in BOOLEANOS_CONFIG:
+        v = crudo.get(clave)
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            limpio[clave] = v
+        else:
+            avisos.append(f"{clave} {v!r} no es true ni false; usando "
+                          f"{DEFAULTS_CONFIG[clave]}")
 
     for clave, (bajo, alto) in LIMITES_CONFIG.items():
         v = crudo.get(clave)

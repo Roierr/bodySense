@@ -25,7 +25,19 @@ import Herramientas as H
 # ==========================================
 # APARIENCIA
 # ==========================================
-ANCHO, ALTO = 720, 700
+ANCHO = 720
+
+# Altos de cada tarjeta. Viven aqui porque la ventana se redimensiona sola
+# cuando el paso 1 se pliega: si el alto se calculara aparte del que se dibuja,
+# sobraria o faltaria espacio al final.
+Y_INICIO = 84          # debajo del encabezado
+SEPARACION = 12
+ALTO_T1_ABIERTO = 122
+ALTO_T1_PLEGADO = 52
+ALTO_T2 = 148
+ALTO_T3 = 122
+ALTO_T4 = 122
+ALTO_PIE = 44          # espacio del mensaje de abajo
 
 FONDO = (18, 22, 28)
 TARJETA = (27, 34, 43)
@@ -213,14 +225,17 @@ class UI:
 # ==========================================
 class Menu:
     def __init__(self):
+        # La config va primero: alto_necesario() la necesita para saber si el
+        # paso 1 arranca plegado.
+        self.cfg, avisos = H.cargar_config()
+        self.mensaje = "AVISO: " + avisos[0] if avisos else ""
+
         pygame.init()
-        self.pantalla = pygame.display.set_mode((ANCHO, ALTO))
+        self.pantalla = pygame.display.set_mode((ANCHO, self.alto_necesario()))
         pygame.display.set_caption("BodySense")
         self.ui = UI(self.pantalla)
         self.reloj = pygame.time.Clock()
 
-        self.cfg, avisos = H.cargar_config()
-        self.mensaje = "AVISO: " + avisos[0] if avisos else ""
         self.proc = None          # subprocess en curso, o None
         self.proc_nombre = ""
         self.ocupado = False
@@ -228,6 +243,16 @@ class Menu:
         self.refrescar()
 
     # --- estado ---
+    def alto_necesario(self):
+        """Alto exacto de la ventana para el estado actual.
+
+        Suma los mismos altos que se dibujan, asi que plegar el paso 1 no
+        puede dejar un hueco muerto al final ni recortar el mensaje.
+        """
+        t1 = ALTO_T1_PLEGADO if self.cfg["tablero_plegado"] else ALTO_T1_ABIERTO
+        return (Y_INICIO + t1 + ALTO_T2 + ALTO_T3 + ALTO_T4
+                + SEPARACION * 3 + ALTO_PIE)
+
     def refrescar(self):
         self.pares = len(H.pares_de_capturas())
         self.calib = leer_calibracion()
@@ -280,15 +305,33 @@ class Menu:
 
     # --- dibujo ---
     def paso_tablero(self, y):
-        u, w, h = self.ui, ANCHO - 48, 122
+        u, w = self.ui, ANCHO - 48
+        cols, filas = self.cfg["checkerboard"]
+        resumen = f"{cols}×{filas} esquinas · {self.cfg['tamano_cuadro_mm']:g} mm"
+
+        # Plegado: una linea. Medir el tablero se hace una vez y este paso no
+        # bloquea ningun otro, asi que no tiene por que ocupar media pantalla.
+        if self.cfg["tablero_plegado"]:
+            h = ALTO_T1_PLEGADO
+            u.tarjeta(24, y, w, h)
+            u.marca(50, y + 26, "ok")
+            u.texto("1", 68, y + 17, TINTA_TENUE, u.f_paso)
+            u.texto("Tablero", 88, y + 17, TINTA, u.f_paso)
+            u.texto(resumen, 168, y + 20, TINTA_SUAVE, u.mono)
+            if u.boton((w - 84, y + 15, 108, 24), "Cambiar"):
+                self.guardar("tablero_plegado", False)
+            return y + h + SEPARACION
+
+        h = ALTO_T1_ABIERTO
         u.tarjeta(24, y, w, h)
         u.marca(50, y + 26, "ok")
         u.texto("1", 68, y + 15, TINTA_TENUE, u.f_paso)
         u.texto("Medir el tablero", 88, y + 15, TINTA, u.f_paso)
         u.texto("El tamano del cuadro fija la escala metrica de todo el sistema.",
                 88, y + 38, TINTA_SUAVE, u.f_chico)
+        if u.boton((w - 84, y + 12, 108, 22), "Omitir paso"):
+            self.guardar("tablero_plegado", True)
 
-        cols, filas = self.cfg["checkerboard"]
         u.texto("Esquinas internas", 88, y + 66, TINTA_SUAVE, u.f)
         nc, x = u.stepper(210, y + 61, cols, 1, 3, 20, str(cols), 34)
         u.texto("×", x + 6, y + 64, TINTA_TENUE, u.f)
@@ -304,10 +347,10 @@ class Menu:
 
         if u.boton((w - 132, y + 70, 156, 34), "Medir con camara", not self.ocupado):
             self.lanzar("medir_tablero.py")
-        return y + h + 12
+        return y + h + SEPARACION
 
     def paso_capturas(self, y):
-        u, w, h = self.ui, ANCHO - 48, 148
+        u, w, h = self.ui, ANCHO - 48, ALTO_T2
         meta = self.cfg["total_fotos"]
         u.tarjeta(24, y, w, h)
         u.marca(50, y + 26, "ok" if self.pares >= MIN_PARES
@@ -342,10 +385,10 @@ class Menu:
         if u.boton((w - 84, y + 112, 108, 26), "Borrar fotos",
                    libre and self.pares > 0, ROJO):
             self.confirmar_borrado = True
-        return y + h + 12
+        return y + h + SEPARACION
 
     def paso_calibracion(self, y):
-        u, w, h = self.ui, ANCHO - 48, 122
+        u, w, h = self.ui, ANCHO - 48, ALTO_T3
         c = self.calib
         estado = ("falta" if c is None else "error" if "error" in c
                   else "ok" if c["creible"] else "medio")
@@ -382,10 +425,10 @@ class Menu:
             self.lanzar("generar_calibracion.py")
         if self.pares < MIN_PARES:
             u.texto("faltan fotos", w - 42, y + 94, TINTA_TENUE, u.f_chico, True)
-        return y + h + 12
+        return y + h + SEPARACION
 
     def paso_ejecutar(self, y):
-        u, w, h = self.ui, ANCHO - 48, 122
+        u, w, h = self.ui, ANCHO - 48, ALTO_T4
         u.tarjeta(24, y, w, h)
         hay = self.calib is not None and "error" not in self.calib
         u.marca(50, y + 26, "ok" if hay else "falta")
@@ -410,7 +453,7 @@ class Menu:
 
     def dialogo_borrado(self):
         u = self.ui
-        velo = pygame.Surface((ANCHO, ALTO), pygame.SRCALPHA)
+        velo = pygame.Surface(self.pantalla.get_size(), pygame.SRCALPHA)
         velo.fill((10, 13, 17, 205))
         self.pantalla.blit(velo, (0, 0))
 
@@ -433,14 +476,13 @@ class Menu:
         self.pantalla.fill(FONDO)
         u.texto("BodySense", 24, 22, TINTA, u.f_titulo)
         u.texto("Flujo de calibracion", 24, 52, TINTA_SUAVE, u.f)
-        cols, filas = self.cfg["checkerboard"]
-        u.texto(f"{cols}×{filas} esquinas · {self.cfg['tamano_cuadro_mm']:g} mm",
-                ANCHO - 24, 26, TINTA_TENUE, u.mono_chico, True)
+        # El resumen del tablero no se repite aqui: el paso 1 lo muestra
+        # siempre, plegado o no, y esta a dos centimetros de distancia.
         if self.ocupado:
-            u.texto(f"corriendo {self.proc_nombre}", ANCHO - 24, 46, AMBAR,
+            u.texto(f"corriendo {self.proc_nombre}", ANCHO - 24, 34, AMBAR,
                     u.f_chico, True)
 
-        y = 84
+        y = Y_INICIO
         y = self.paso_tablero(y)
         y = self.paso_capturas(y)
         y = self.paso_calibracion(y)
@@ -467,6 +509,13 @@ class Menu:
                     self.ui.click = ev.pos
 
             self.actualizar_proceso()
+
+            # Solo al plegar o desplegar el paso 1. Recrear la ventana cada
+            # cuadro parpadearia.
+            alto = self.alto_necesario()
+            if self.pantalla.get_height() != alto:
+                self.pantalla = pygame.display.set_mode((ANCHO, alto))
+                self.ui.p = self.pantalla
 
             if self.confirmar_borrado:
                 # El dialogo se traga los clicks: el fondo se redibuja sin

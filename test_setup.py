@@ -175,9 +175,11 @@ def test_config_rechaza_valores_invalidos():
     limpio, avisos = validar_config({})
     assert limpio == DEFAULTS_CONFIG and not avisos, "un dict vacio son los defaults"
 
-    limpio, avisos = validar_config({"checkerboard": [9, 6], "tamano_cuadro_mm": 25})
+    limpio, avisos = validar_config({"checkerboard": [9, 6], "tamano_cuadro_mm": 25,
+                                     "tablero_plegado": True})
     assert limpio["checkerboard"] == [9, 6]
     assert limpio["tamano_cuadro_mm"] == 25.0
+    assert limpio["tablero_plegado"] is True
     assert not avisos, f"valores validos no deben avisar: {avisos}"
 
     malos = [
@@ -192,6 +194,8 @@ def test_config_rechaza_valores_invalidos():
         {"total_fotos": 2},                  # menos del minimo para calibrar
         {"total_fotos": True},               # bool no es un numero valido
         {"intervalo_segundos": 0},           # 30 fotos identicas
+        {"tablero_plegado": "si"},           # texto en una clave si/no
+        {"tablero_plegado": 1},              # un 1 no es true
     ]
     for crudo in malos:
         clave = next(iter(crudo))
