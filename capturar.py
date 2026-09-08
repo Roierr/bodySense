@@ -3,17 +3,14 @@ import numpy as np
 import os
 import time
 
-from Herramientas import (BACKEND_CAMARA, CHECKERBOARD, MIN_ANCHO_TABLERO,
+from Herramientas import (BACKEND_CAMARA, CARPETA_CAPTURAS, CHECKERBOARD,
+                          INTERVALO_SEGUNDOS, MIN_ANCHO_TABLERO, TOTAL_FOTOS,
                           detectar_tablero, tamano_relativo)
 
 # === CONFIGURACIÓN ===
-# Busco la ruta donde está ESTE archivo .py
-CARPETA_BASE = os.path.dirname(os.path.abspath(__file__))
-# Creo la carpeta de fotos AQUÍ MISMO
-CARPETA_GUARDADO = os.path.join(CARPETA_BASE, "capturas")
-
-INTERVALO_SEGUNDOS = 2.0
-TOTAL_FOTOS = 30
+# Todo esto sale de Herramientas.py, que lo lee de config.json: el tablero, el
+# minimo de tamano, cuantas fotos y cada cuanto. Se edita desde inicio.py.
+CARPETA_GUARDADO = CARPETA_CAPTURAS
 
 if not os.path.exists(CARPETA_GUARDADO):
     os.makedirs(CARPETA_GUARDADO)

@@ -163,6 +163,118 @@ def test_detectar_tablero_encuentra_las_esquinas_internas():
         f"esquinas mal localizadas: min en {p.min(axis=0)}"
 
 
+def test_config_rechaza_valores_invalidos():
+    """config.json es una frontera de confianza: lo edita un menu y una persona.
+
+    Un cero en checkerboard o un tamano de cuadro negativo produciria una
+    calibracion basura sin ningun error visible, asi que un valor fuera de
+    rango tiene que caer al default y avisar, nunca pasar de largo.
+    """
+    from Herramientas import DEFAULTS_CONFIG, validar_config
+
+    limpio, avisos = validar_config({})
+    assert limpio == DEFAULTS_CONFIG and not avisos, "un dict vacio son los defaults"
+
+    limpio, avisos = validar_config({"checkerboard": [9, 6], "tamano_cuadro_mm": 25})
+    assert limpio["checkerboard"] == [9, 6]
+    assert limpio["tamano_cuadro_mm"] == 25.0
+    assert not avisos, f"valores validos no deben avisar: {avisos}"
+
+    malos = [
+        {"checkerboard": [0, 7]},            # una rejilla de 0 no existe
+        {"checkerboard": [7]},               # falta una dimension
+        {"checkerboard": "7x7"},             # no es lista
+        {"checkerboard": [7.5, 7]},          # no entero
+        {"tamano_cuadro_mm": -20},           # negativo: escala invertida
+        {"tamano_cuadro_mm": 0},             # cero: escala colapsada
+        {"tamano_cuadro_mm": "20"},          # texto
+        {"min_ancho_tablero": 1.5},          # mas del 100% del cuadro
+        {"total_fotos": 2},                  # menos del minimo para calibrar
+        {"total_fotos": True},               # bool no es un numero valido
+        {"intervalo_segundos": 0},           # 30 fotos identicas
+    ]
+    for crudo in malos:
+        clave = next(iter(crudo))
+        limpio, avisos = validar_config(crudo)
+        assert limpio[clave] == DEFAULTS_CONFIG[clave], \
+            f"{crudo} se acepto y deberia caer al default"
+        assert avisos, f"{crudo} se rechazo en silencio, sin aviso"
+
+
+def test_guardar_config_no_pierde_ediciones_previas():
+    """Editar el tablero y luego el cuadro debe conservar los dos.
+
+    La primera version mezclaba sobre la CONFIG del import, que nunca cambia,
+    asi que el segundo guardado revertia el primero.
+    """
+    import json
+    import tempfile
+    import Herramientas as H
+
+    original = H.ARCHIVO_CONFIG
+    with tempfile.TemporaryDirectory() as tmp:
+        H.ARCHIVO_CONFIG = os.path.join(tmp, "config.json")
+        try:
+            H.guardar_config({"checkerboard": [9, 6]})
+            guardada, _ = H.guardar_config({"tamano_cuadro_mm": 25.0})
+
+            assert guardada["checkerboard"] == [9, 6], \
+                f"se perdio el tablero al guardar el cuadro: {guardada}"
+            assert guardada["tamano_cuadro_mm"] == 25.0
+
+            with open(H.ARCHIVO_CONFIG, encoding="utf-8") as f:
+                del_disco = json.load(f)
+            assert del_disco["checkerboard"] == [9, 6], "el disco no coincide"
+
+            # Un valor invalido no se escribe: se guarda el default y avisa.
+            guardada, avisos = H.guardar_config({"tamano_cuadro_mm": -5})
+            assert avisos and guardada["tamano_cuadro_mm"] == 20.0
+        finally:
+            H.ARCHIVO_CONFIG = original
+
+
+def test_pares_de_capturas_solo_empareja_indices_completos():
+    """El menu cuenta pares con esta funcion y generar_calibracion.py calibra
+    con ella: si contaran distinto, el menu diria 18 y el calibrador 12."""
+    import tempfile
+    from Herramientas import pares_de_capturas
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for nombre in ("cam0_0.png", "cam1_0.png",      # par bueno
+                       "cam0_1.png", "cam1_1.png",      # par bueno
+                       "cam0_2.png",                    # sin su cam1
+                       "cam1_3.png",                    # sin su cam0
+                       "cam0_4.jpg", "cam1_4.png",      # extension distinta
+                       "cam0_x.png", "cam1_x.png",      # indice no numerico
+                       "notas.txt"):
+            open(os.path.join(tmp, nombre), "w").close()
+
+        pares = pares_de_capturas(tmp)
+        assert len(pares) == 2, f"esperados 2 pares, dio {len(pares)}: {pares}"
+        assert [os.path.basename(a) for a, _ in pares] == ["cam0_0.png", "cam0_1.png"]
+        assert [os.path.basename(b) for _, b in pares] == ["cam1_0.png", "cam1_1.png"]
+
+    # Una carpeta que no existe son cero pares, no una excepcion: el menu la
+    # consulta antes de que capturar.py se haya corrido nunca.
+    assert pares_de_capturas(os.path.join(tempfile.gettempdir(), "no_existe_xyz")) == []
+
+
+def test_fov_delata_la_calibracion_mal_condicionada():
+    """El chequeo que detecta una calibracion mala aunque su RMS se vea bien."""
+    from Herramientas import RANGO_FOV_CREIBLE, fov_grados
+
+    bajo, alto = RANGO_FOV_CREIBLE
+
+    # El caso real de este proyecto: 1515 px de focal en un cuadro de 640.
+    malo = fov_grados(1515, 640)
+    assert abs(malo - 23.9) < 0.1, f"esperado ~23.9 grados, dio {malo:.1f}"
+    assert not bajo < malo < alto, "24 grados no es creible para una webcam"
+
+    # Una webcam normal: 530 px en 640 son ~62 grados.
+    bueno = fov_grados(530.6, 640)
+    assert bajo < bueno < alto, f"{bueno:.1f} grados deberia ser creible"
+
+
 if __name__ == "__main__":
     for nombre, fn in sorted(globals().items()):
         if nombre.startswith("test_"):

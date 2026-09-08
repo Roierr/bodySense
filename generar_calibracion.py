@@ -3,23 +3,18 @@ import cv2
 import os
 import sys
 
-from Herramientas import (CARPETA_CALIBRACION, CHECKERBOARD, detectar_tablero,
-                          ordenar_esquinas)
+from Herramientas import (CARPETA_CALIBRACION, CARPETA_CAPTURAS, CHECKERBOARD,
+                          RANGO_FOV_CREIBLE, TAMANO_CUADRO, detectar_tablero,
+                          fov_grados, ordenar_esquinas, pares_de_capturas)
 
 # === CONFIGURACIÓN ===
-CARPETA_BASE = os.path.dirname(os.path.abspath(__file__))
-CARPETA_FOTOS = os.path.join(CARPETA_BASE, "capturas")
+CARPETA_FOTOS = CARPETA_CAPTURAS
 # Guardo donde main.py ya busca la calibracion, no en la raiz
 os.makedirs(CARPETA_CALIBRACION, exist_ok=True)
 ARCHIVO_FINAL = os.path.join(CARPETA_CALIBRACION, "stereo.npz")
 
-# Parámetros del tablero de ajedrez. CHECKERBOARD viene de Herramientas.py
-# para que capturar.py y este archivo no puedan desincronizarse.
-# TAMANO_CUADRO es el lado de un cuadro EN MILIMETROS, medido con regla: es el
-# unico dato del mundo real que entra al sistema y fija la escala metrica de
-# TODA la reconstruccion. Si esta mal, la calibracion converge igual, el RMS
-# sale igual de bueno, y todas las distancias 3D quedan mal por ese factor.
-TAMANO_CUADRO = 20
+# CHECKERBOARD y TAMANO_CUADRO vienen de Herramientas.py, que los lee de
+# config.json, para que capturar.py y este archivo no puedan desincronizarse.
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001) # Criterios para la refinación de esquinas
 
 print(f"Leyendo fotos de: {CARPETA_FOTOS}") 
@@ -39,29 +34,10 @@ objpoints = []
 imgpoints_l = [] 
 imgpoints_r = [] 
 
-# Función para extraer el número de la imagen, OSEA EL ÍNDICE de la foto
-
-def obtener_numero(nombre):
-    try:
-        base = os.path.basename(nombre)
-        num = base.split('_')[-1].split('.')[0]
-        return int(num)
-    except: return -1
-
-# Obtengo las listas de archivos de ambas cámaras
-
-todos_archivos = os.listdir(CARPETA_FOTOS)
-archivos_izq = sorted([f for f in todos_archivos if 'cam0' in f], key=obtener_numero)
-archivos_der = sorted([f for f in todos_archivos if 'cam1' in f], key=obtener_numero)
-
-# Emparejo los archivos por número de indice con la función obtener_numero
-pares_validos = []
-for f_izq in archivos_izq:
-    num = obtener_numero(f_izq)
-    f_der_esperado = f"cam1_{num}.png"
-    if f_der_esperado in archivos_der:
-        pares_validos.append((os.path.join(CARPETA_FOTOS, f_izq), 
-                              os.path.join(CARPETA_FOTOS, f_der_esperado)))
+# Emparejo cam0_N.png con cam1_N.png. La funcion vive en Herramientas.py
+# porque inicio.py cuenta los pares con ella y aqui se calibra con ellos: si
+# cada uno los contara a su manera, el menu y el calibrador discreparian.
+pares_validos = pares_de_capturas(CARPETA_FOTOS)
 
 # Muestro la cantidad de pares encontrados
 print(f"Pares encontrados: {len(pares_validos)}")
@@ -175,8 +151,9 @@ print(f"\nError RMS estereo: {ret:.3f} px  " +
 # condicionada aunque el RMS se vea bien. Es el error que no avisa solo.
 print("\nVerificacion de plausibilidad:")
 for nombre, mtx, forma in (("cam0", mtx1, shape_l), ("cam1", mtx2, shape_r)):
-    fov = 2 * np.degrees(np.arctan(forma[0] / (2 * mtx[0, 0])))
-    veredicto = "creible" if 40 < fov < 130 else "IMPLAUSIBLE - recaptura"
+    fov = fov_grados(mtx[0, 0], forma[0])
+    bajo, alto = RANGO_FOV_CREIBLE
+    veredicto = "creible" if bajo < fov < alto else "IMPLAUSIBLE - recaptura"
     print(f"  {nombre}: fx={mtx[0,0]:8.1f} -> campo de vision {fov:5.1f} grados   {veredicto}")
 
 baseline = float(np.linalg.norm(T))
