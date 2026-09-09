@@ -16,8 +16,8 @@ if not os.path.exists(CARPETA_GUARDADO):
     os.makedirs(CARPETA_GUARDADO)
     print(f"✅ Carpeta de fotos creada en: {CARPETA_GUARDADO}")
 
-cap0 = cv2.VideoCapture(0, BACKEND_CAMARA)
-cap1 = cv2.VideoCapture(1, BACKEND_CAMARA)
+cap0 = cv2.VideoCapture(1, BACKEND_CAMARA)
+cap1 = cv2.VideoCapture(2, BACKEND_CAMARA)
 
 if not cap0.isOpened() or not cap1.isOpened():
     print("❌ Error: No se detectan las cámaras.")

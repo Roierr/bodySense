@@ -114,7 +114,7 @@ def probar_camaras():
     import cv2
 
     partes = []
-    for i in (0, 1):
+    for i in (1, 2):
         cap = cv2.VideoCapture(i, H.BACKEND_CAMARA)
         ok, frame = (False, None)
         if cap.isOpened():

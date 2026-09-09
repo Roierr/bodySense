@@ -70,7 +70,7 @@ def main():
     pose1 = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, model_complexity=0)
     
     
-    cap0 = cv2.VideoCapture(0, BACKEND_CAMARA); cap1 = cv2.VideoCapture(1, BACKEND_CAMARA)
+    cap0 = cv2.VideoCapture(1, BACKEND_CAMARA); cap1 = cv2.VideoCapture(2, BACKEND_CAMARA)
     if not cap0.isOpened() or not cap1.isOpened():
         print("\nERROR: No se detectan las dos camaras."); pygame.quit(); return
     
