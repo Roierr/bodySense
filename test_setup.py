@@ -369,6 +369,82 @@ def test_identificador_de_diccionario_acierta():
     medir_charuco.demo()
 
 
+def test_metricas_posturales_contra_cuerpos_conocidos():
+    """Si le pido 15 grados de inclinacion, la metrica tiene que devolver 15."""
+    import registro
+
+    registro.demo()
+
+
+def test_comparacion_no_depende_de_la_estatura_ni_del_lugar():
+    """El punto entero de usar angulos y no coordenadas.
+
+    Dos personas de estatura distinta, paradas en puntos distintos de la sala,
+    tienen que dar la misma diferencia postural. Con coordenadas crudas esto
+    seria imposible: el hombro de cada quien esta en otro lado.
+    """
+    import tempfile
+    import numpy as np
+    import registro as R
+
+    with tempfile.TemporaryDirectory() as tmp:
+        con = R.abrir_bd(os.path.join(tmp, "prueba.db"))
+        ref = R.crear_usuario(con, "Referencia", altura_cm=165)
+        otro = R.crear_usuario(con, "Otro", altura_cm=182)
+        R.marcar_referencia(con, ref)
+
+        assert R.crear_usuario(con, "Otro") == otro, "dar de alta dos veces debe reusar el id"
+
+        with R.Sesion(con, ref, carpeta=tmp) as s_ref:
+            for k in range(30):
+                s_ref.anotar(k / 30, R.cuerpo_sintetico(inclinacion=2.0,
+                                                        altura_mm=1650), 1900)
+
+        # Mas alto, mas encorvado, y parado en otro punto de la sala.
+        with R.Sesion(con, otro, carpeta=tmp) as s2:
+            for k in range(30):
+                p = R.cuerpo_sintetico(inclinacion=17.0, desnivel=4.0, altura_mm=1830)
+                p = {i: v + np.array([350.0, 0.0, 500.0]) for i, v in p.items()}
+                s2.anotar(k / 30, p, 2400)
+
+        comp = R.comparar_con_referencia(con, s2.id)
+        assert comp, "no hubo comparacion; falta usuario de referencia o su sesion"
+        assert abs(comp["inclinacion_tronco"]["diferencia"] - 15.0) < 0.05, \
+            f"esperada una diferencia de 15 grados, dio {comp['inclinacion_tronco']}"
+        assert abs(comp["desnivel_hombros"]["diferencia"] - 4.0) < 0.05, \
+            f"esperada una diferencia de 4 grados, dio {comp['desnivel_hombros']}"
+
+        # El CSV queda escrito, con una fila por cuadro y cabecera legible.
+        assert os.path.exists(s2.ruta_csv)
+        with open(s2.ruta_csv, encoding="utf-8") as f:
+            filas = f.read().strip().split("\n")
+        assert len(filas) == 31, f"esperadas 30 filas mas cabecera, hay {len(filas)}"
+        assert filas[0].startswith("cuadro,t_seg,distancia_mm,nariz_x"), filas[0]
+
+
+def test_nombres_de_usuario_no_pueden_inyectar_sql():
+    """El nombre lo escribe una persona: es una frontera de confianza."""
+    import tempfile
+    import registro as R
+
+    with tempfile.TemporaryDirectory() as tmp:
+        con = R.abrir_bd(os.path.join(tmp, "prueba.db"))
+        R.crear_usuario(con, "Normal")
+        R.crear_usuario(con, "'); DROP TABLE usuarios;--")
+        R.crear_usuario(con, '" OR "1"="1')
+
+        n = con.execute("SELECT COUNT(*) c FROM usuarios").fetchone()["c"]
+        assert n == 3, f"la tabla deberia tener 3 usuarios, tiene {n}"
+
+        for vacio in ("", "   ", None):
+            try:
+                R.crear_usuario(con, vacio)
+            except ValueError:
+                pass
+            else:
+                assert False, f"un nombre {vacio!r} deberia rechazarse"
+
+
 if __name__ == "__main__":
     for nombre, fn in sorted(globals().items()):
         if nombre.startswith("test_"):

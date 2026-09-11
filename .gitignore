@@ -12,3 +12,13 @@ capturas/
 # Herramientas.py son los valores actuales, asi que sin este archivo el
 # proyecto arranca igual.
 config.json
+
+# ----------------------------------
+# 3. Datos personales de las sesiones
+# ----------------------------------
+# La base guarda nombres, estaturas y medidas corporales de personas reales, y
+# los CSV guardan su postura cuadro por cuadro. Eso NO va a un repositorio
+# publico: son datos de terceros que dieron su cuerpo para una prueba, no
+# codigo. El esquema vive en registro.py, asi que la base se recrea sola.
+bodysense.db
+sesiones/
