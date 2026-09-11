@@ -279,6 +279,96 @@ def test_fov_delata_la_calibracion_mal_condicionada():
     assert bajo < bueno < alto, f"{bueno:.1f} grados deberia ser creible"
 
 
+def test_charuco_detecta_el_tablero_a_medias():
+    """La razon de cambiar a CharuCo: detecta aunque el tablero salga cortado.
+
+    El detector de ajedrez exige ver TODAS las esquinas internas; si una se
+    sale del cuadro, no devuelve nada. Es lo que hacia que al acercar el
+    tablero dejara de detectarse. CharuCo identifica cada esquina por su
+    codigo, asi que reporta las que alcance a ver.
+    """
+    import Herramientas as H
+
+    cfg = dict(H.CONFIG, charuco_cuadros=[5, 7], charuco_cuadro_mm=30.0,
+               charuco_marcador_mm=22.0, charuco_diccionario="DICT_5X5_100")
+    board, detector = H.crear_charuco(cfg)
+    img = board.generateImage((600, 840), marginSize=25)
+    alto, ancho = img.shape
+
+    ok, _, ids = H.detectar_charuco(img, detector)
+    assert ok and len(ids) == 24, f"tablero completo: esperadas 24 esquinas, dio {ids}"
+
+    # Recortado al 60%: CharuCo sigue, el de ajedrez se rinde.
+    recorte = img[:int(alto * 0.6), :int(ancho * 0.6)]
+    ok_ch, _, ids_ch = H.detectar_charuco(recorte, detector)
+    assert ok_ch, "CharuCo no detecto el tablero recortado al 60%"
+    assert 0 < len(ids_ch) < 24, f"deberia ver un subconjunto, vio {len(ids_ch)}"
+
+    ok_aj, _ = cv2.findChessboardCorners(recorte, (4, 6), H.FLAGS_TABLERO)
+    assert not ok_aj, "el de ajedrez detecto el recorte; la prueba no reproduce el caso"
+
+
+def test_charuco_puntos_3d_corresponden_a_los_ids():
+    """Cada foto ve un subconjunto distinto, asi que los puntos 3D se arman
+    por foto segun los IDs. Si se desalinean, la calibracion sale basura."""
+    import numpy as np
+    import Herramientas as H
+
+    LADO = 30.0
+    cfg = dict(H.CONFIG, charuco_cuadros=[5, 7], charuco_cuadro_mm=LADO,
+               charuco_marcador_mm=22.0, charuco_diccionario="DICT_5X5_100")
+    board, _ = H.crear_charuco(cfg)
+
+    todos = H.puntos_de_charuco(board, np.arange(24))
+    assert todos.shape == (24, 3), f"esperado (24,3), dio {todos.shape}"
+    assert np.allclose(todos[:, 2], 0), "las esquinas del tablero son coplanares: Z=0"
+
+    # Las esquinas contiguas de una fila estan a un lado de cuadro de distancia.
+    assert abs(float(np.linalg.norm(todos[1] - todos[0])) - LADO) < 1e-4, \
+        f"separacion entre esquinas contiguas deberia ser {LADO} mm"
+
+    # Un subconjunto tiene que devolver EXACTAMENTE esos puntos, en ese orden.
+    subset = np.array([5, 2, 17])
+    assert np.allclose(H.puntos_de_charuco(board, subset), todos[subset]), \
+        "los puntos 3D no siguen el orden de los IDs pedidos"
+
+
+def test_config_charuco_rechaza_un_marcador_mas_grande_que_su_cuadro():
+    """El marcador va DENTRO del cuadro blanco: no puede ser mas grande.
+
+    Es la unica regla que cruza dos campos. Cada valor por separado esta en
+    rango y aun asi la combinacion es fisicamente imposible.
+    """
+    from Herramientas import DEFAULTS_CONFIG, validar_config
+
+    limpio, avisos = validar_config({"charuco_cuadro_mm": 30.0,
+                                     "charuco_marcador_mm": 22.0})
+    assert not avisos and limpio["charuco_marcador_mm"] == 22.0
+
+    for malo in ({"charuco_cuadro_mm": 20.0, "charuco_marcador_mm": 25.0},
+                 {"charuco_cuadro_mm": 20.0, "charuco_marcador_mm": 20.0}):
+        limpio, avisos = validar_config(malo)
+        assert avisos, f"{malo} se acepto en silencio"
+        assert limpio["charuco_cuadro_mm"] == DEFAULTS_CONFIG["charuco_cuadro_mm"]
+        assert limpio["charuco_marcador_mm"] == DEFAULTS_CONFIG["charuco_marcador_mm"]
+
+    # Un diccionario que no existe en esta version tambien se rechaza.
+    limpio, avisos = validar_config({"charuco_diccionario": "DICT_INVENTADO_99"})
+    assert avisos and limpio["charuco_diccionario"] == DEFAULTS_CONFIG["charuco_diccionario"]
+
+    # Y un tipo de tablero desconocido.
+    limpio, avisos = validar_config({"tablero_tipo": "damas"})
+    assert avisos and limpio["tablero_tipo"] == "ajedrez"
+
+
+def test_identificador_de_diccionario_acierta():
+    """medir_charuco.py tiene que distinguir el diccionario correcto de los 26
+    restantes, y no confundirse con un tablero de ajedrez normal."""
+    import medir_charuco
+
+    medir_charuco.demo()
+
+
 if __name__ == "__main__":
     for nombre, fn in sorted(globals().items()):
         if nombre.startswith("test_"):

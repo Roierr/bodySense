@@ -62,6 +62,23 @@ CRITERIA_SUBPIX = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.00
 # tablero_plegado no configura nada del sistema: recuerda si inicio.py muestra
 # el paso del tablero desplegado o en una linea. Una vez medido el tablero no
 # hay razon para volver a medirlo, y ese paso no bloquea ningun otro.
+#
+# tablero_tipo elige entre el tablero de ajedrez de siempre y uno CharuCo, que
+# es un tablero de ajedrez con un codigo ArUco impreso dentro de cada cuadro
+# blanco. La diferencia practica es grande:
+#   - El de ajedrez exige ver TODAS sus esquinas internas. Si una se sale del
+#     cuadro, no detecta nada. De ahi venia que al acercarlo dejara de verse.
+#   - El CharuCo identifica cada esquina por su codigo, asi que detecta las que
+#     alcance a ver. Se puede acercar hasta llenar el cuadro, que es justo lo
+#     que le faltaba a la calibracion vieja para quedar bien condicionada.
+#   - Y como cada esquina trae identidad, desaparece la ambiguedad de las
+#     cuatro orientaciones que ordenar_esquinas tiene que resolver a mano.
+# Se conservan los dos caminos: el de ajedrez sigue funcionando igual y es el
+# respaldo mientras el CharuCo no este probado contra el tablero fisico.
+#
+# Los cuatro datos del CharuCo deben coincidir EXACTAMENTE con el tablero
+# impreso o no detecta nada. charuco_diccionario se averigua con
+# medir_charuco.py, que prueba los 27 diccionarios y dice cual responde.
 DEFAULTS_CONFIG = {
     "checkerboard": [7, 7],
     "tamano_cuadro_mm": 20.0,
@@ -69,10 +86,18 @@ DEFAULTS_CONFIG = {
     "total_fotos": 30,
     "intervalo_segundos": 2.0,
     "tablero_plegado": False,
+    "tablero_tipo": "ajedrez",
+    "charuco_cuadros": [5, 7],
+    "charuco_cuadro_mm": 30.0,
+    "charuco_marcador_mm": 22.0,
+    "charuco_diccionario": "DICT_5X5_100",
 }
 
 # Claves que son si/no, no numeros.
 BOOLEANOS_CONFIG = ("tablero_plegado",)
+
+# Claves de texto que solo aceptan ciertos valores.
+TIPOS_TABLERO = ("ajedrez", "charuco")
 
 # Rangos plausibles. Un valor fuera de rango NO se usa: se cae al default y se
 # avisa. config.json lo escribe un menu y lo puede editar una persona a mano,
@@ -83,7 +108,15 @@ LIMITES_CONFIG = {
     "min_ancho_tablero": (0.02, 0.90),
     "total_fotos": (10, 200),
     "intervalo_segundos": (0.2, 30.0),
+    "charuco_cuadro_mm": (1.0, 500.0),
+    "charuco_marcador_mm": (1.0, 500.0),
 }
+
+
+def _pareja_de_enteros(v, bajo, alto):
+    return (isinstance(v, (list, tuple)) and len(v) == 2
+            and all(isinstance(x, int) and not isinstance(x, bool)
+                    and bajo <= x <= alto for x in v))
 
 
 def validar_config(crudo):
@@ -92,14 +125,38 @@ def validar_config(crudo):
 
     cb = crudo.get("checkerboard")
     if cb is not None:
-        if (isinstance(cb, (list, tuple)) and len(cb) == 2
-                and all(isinstance(v, int) and not isinstance(v, bool)
-                        and 3 <= v <= 20 for v in cb)):
+        if _pareja_de_enteros(cb, 3, 20):
             limpio["checkerboard"] = [int(cb[0]), int(cb[1])]
         else:
             avisos.append(f"checkerboard {cb!r} invalido "
                           f"(se esperan dos enteros de 3 a 20); usando "
                           f"{DEFAULTS_CONFIG['checkerboard']}")
+
+    cc = crudo.get("charuco_cuadros")
+    if cc is not None:
+        if _pareja_de_enteros(cc, 3, 30):
+            limpio["charuco_cuadros"] = [int(cc[0]), int(cc[1])]
+        else:
+            avisos.append(f"charuco_cuadros {cc!r} invalido "
+                          f"(se esperan dos enteros de 3 a 30); usando "
+                          f"{DEFAULTS_CONFIG['charuco_cuadros']}")
+
+    tt = crudo.get("tablero_tipo")
+    if tt is not None:
+        if tt in TIPOS_TABLERO:
+            limpio["tablero_tipo"] = tt
+        else:
+            avisos.append(f"tablero_tipo {tt!r} desconocido "
+                          f"(se espera uno de {TIPOS_TABLERO}); usando "
+                          f"{DEFAULTS_CONFIG['tablero_tipo']}")
+
+    dic = crudo.get("charuco_diccionario")
+    if dic is not None:
+        if isinstance(dic, str) and dic.startswith("DICT_") and hasattr(cv2.aruco, dic):
+            limpio["charuco_diccionario"] = dic
+        else:
+            avisos.append(f"charuco_diccionario {dic!r} no existe en esta version "
+                          f"de OpenCV; usando {DEFAULTS_CONFIG['charuco_diccionario']}")
 
     for clave in BOOLEANOS_CONFIG:
         v = crudo.get(clave)
@@ -123,6 +180,19 @@ def validar_config(crudo):
                           f"usando {DEFAULTS_CONFIG[clave]}")
         else:
             limpio[clave] = int(v) if clave == "total_fotos" else float(v)
+
+    # El marcador ArUco va DENTRO de un cuadro blanco, asi que tiene que ser
+    # mas chico que el cuadro. Es la unica regla que cruza dos campos: cada uno
+    # por separado puede estar en rango y aun asi ser imposible juntos. Un
+    # marcador mas grande que su cuadro produciria una calibracion basura sin
+    # ningun error visible.
+    if limpio["charuco_marcador_mm"] >= limpio["charuco_cuadro_mm"]:
+        avisos.append(
+            f"charuco_marcador_mm ({limpio['charuco_marcador_mm']:g}) debe ser MENOR "
+            f"que charuco_cuadro_mm ({limpio['charuco_cuadro_mm']:g}): el marcador va "
+            f"dentro del cuadro. Usando los valores por defecto de ambos")
+        limpio["charuco_cuadro_mm"] = DEFAULTS_CONFIG["charuco_cuadro_mm"]
+        limpio["charuco_marcador_mm"] = DEFAULTS_CONFIG["charuco_marcador_mm"]
 
     return limpio, avisos
 
@@ -249,6 +319,58 @@ def ordenar_esquinas(esquinas, tablero=CHECKERBOARD):
             mejor, mejor_score = cand, score
 
     return np.ascontiguousarray(mejor.reshape(-1, 1, 2))
+
+
+def crear_charuco(cfg=None):
+    """Arma el tablero CharuCo descrito en config.json y su detector.
+
+    Los cuatro datos (cuadros, lado del cuadro, lado del marcador, diccionario)
+    tienen que coincidir EXACTAMENTE con el tablero impreso. Si no, no detecta
+    nada: no avisa con un error, simplemente devuelve cero esquinas siempre.
+
+    Devuelve (board, detector). El board tambien sabe las coordenadas 3D de
+    cada esquina, que es lo que generar_calibracion.py necesita.
+    """
+    c = cfg or CONFIG
+    diccionario = cv2.aruco.getPredefinedDictionary(
+        getattr(cv2.aruco, c["charuco_diccionario"]))
+    board = cv2.aruco.CharucoBoard(
+        tuple(c["charuco_cuadros"]),
+        float(c["charuco_cuadro_mm"]),
+        float(c["charuco_marcador_mm"]),
+        diccionario)
+    return board, cv2.aruco.CharucoDetector(board)
+
+
+def detectar_charuco(gris, detector):
+    """Detecta un tablero CharuCo. Devuelve (encontrado, esquinas, ids).
+
+    A diferencia del tablero de ajedrez, aqui cada esquina viene con su ID: el
+    detector sabe CUAL esquina es cada una, no solo donde esta. Dos
+    consecuencias:
+
+      - No hace falta ver el tablero completo. Detecta las esquinas que
+        alcance, asi que el tablero se puede acercar hasta llenar el cuadro.
+      - No hay ambiguedad de orientacion, asi que ordenar_esquinas no se
+        necesita en este camino: los IDs ya emparejan las dos camaras.
+
+    Cada foto puede devolver un subconjunto DISTINTO de esquinas, por eso hay
+    que devolver los ids junto con los puntos.
+    """
+    esquinas, ids, _, _ = detector.detectBoard(gris)
+    if esquinas is None or ids is None or len(ids) < 4:
+        return False, None, None
+    return True, esquinas, ids.ravel()
+
+
+def puntos_de_charuco(board, ids):
+    """Coordenadas 3D reales (en mm) de las esquinas con esos IDs.
+
+    El tablero de ajedrez usa siempre la misma rejilla completa. El CharuCo no:
+    cada foto ve un subconjunto, asi que los puntos 3D se arman por foto a
+    partir de los IDs detectados.
+    """
+    return board.getChessboardCorners()[ids].astype(np.float32)
 
 
 # Rango de campo de vision horizontal creible para una camara web, en grados.
