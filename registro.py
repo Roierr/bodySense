@@ -25,7 +25,7 @@ from datetime import datetime
 
 import numpy as np
 
-from Herramientas import BASE
+from utils.Herramientas import BASE
 
 ARCHIVO_BD = os.path.join(BASE, "bodysense.db")
 CARPETA_SESIONES = os.path.join(BASE, "sesiones")

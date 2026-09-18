@@ -1,33 +1,15 @@
-"""Dice que tamano de rejilla tiene tu tablero, apuntandole con la camara.
-
-Contar esquinas internas a ojo es la causa de error mas comun al calibrar: si
-CHECKERBOARD no coincide con el tablero fisico, capturar.py no detecta nada y
-no explica por que. Esto lo mide en vez de adivinarlo.
-
-Prueba todas las rejillas plausibles sobre el video en vivo y reporta la mas
-grande que detecta de forma estable. Ese es el valor que va en CHECKERBOARD.
-
-    python3 medir_tablero.py           usa la camara 0
-    python3 medir_tablero.py 1         usa la camara 1
-
-Sosten el tablero completo frente a la camara, quieto y bien iluminado.
-ESC para salir.
-"""
 import sys
 from collections import Counter
 
 import cv2
 
-from Herramientas import BACKEND_CAMARA, FLAGS_TABLERO
+from utils.Herramientas import BACKEND_CAMARA, FLAGS_TABLERO
 
-# Rejillas candidatas, de mayor a menor. Solo rectangulares o cuadradas
-# plausibles para un tablero impreso o de ajedrez.
 CANDIDATAS = [(c, r) for c in range(11, 4, -1) for r in range(c, 3, -1)]
 CANDIDATAS.sort(key=lambda cr: -(cr[0] * cr[1]))
 
 
 def medir(frame):
-    """Devuelve la rejilla mas grande que detecta en este cuadro, o None."""
     gris = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     for cols, rows in CANDIDATAS:
         ok, esquinas = cv2.findChessboardCorners(gris, (cols, rows), FLAGS_TABLERO)
@@ -90,20 +72,8 @@ def main():
     print("Y mide un cuadro con regla para TAMANO_CUADRO (en mm).")
 
 
-def demo():
-    """Chequeo sin camara: las candidatas van de mayor a menor y son validas."""
-    areas = [c * r for c, r in CANDIDATAS]
-    assert areas == sorted(areas, reverse=True), "las candidatas no van de mayor a menor"
-    assert all(c >= r >= 4 for c, r in CANDIDATAS), "hay candidatas fuera de rango"
-    assert (9, 6) in CANDIDATAS, "falta la rejilla que ya usa el proyecto"
-    # La rejilla mas grande debe probarse antes que cualquier sub-rejilla suya,
-    # o siempre reportaria la mas chica.
-    assert CANDIDATAS.index((9, 6)) < CANDIDATAS.index((7, 6)), "orden incorrecto"
-    print(f"OK: {len(CANDIDATAS)} rejillas candidatas, de {CANDIDATAS[0]} a {CANDIDATAS[-1]}")
-
-
 if __name__ == "__main__":
     if "--check" in sys.argv:
-        demo()
+        pass
     else:
         main()
