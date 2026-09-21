@@ -20,45 +20,61 @@ import time
 import numpy as np
 import pygame
 
-import Herramientas as H
+import utils.Herramientas as H
 
 # ==========================================
-# APARIENCIA
+# APARIENCIA - estilo menu 2x2 con tarjetas grandes
 # ==========================================
-ANCHO = 720
+ANCHO = 1000
+ALTO = 720
+MARGEN = 24
+GAP = 16
+CARD_W = (ANCHO - MARGEN * 2 - GAP) // 2
+CARD_H = 250
+Y_TITULO = 100         # grilla mas abajo, separada del titulo
 
-# Altos de cada tarjeta. Viven aqui porque la ventana se redimensiona sola
-# cuando el paso 1 se pliega: si el alto se calculara aparte del que se dibuja,
-# sobraria o faltaria espacio al final.
-Y_INICIO = 84          # debajo del encabezado
-SEPARACION = 12
-ALTO_T1_ABIERTO = 122
-ALTO_T1_PLEGADO = 52
-ALTO_T2 = 148
-ALTO_T3 = 122
-ALTO_T4 = 122
-ALTO_PIE = 44          # espacio del mensaje de abajo
+# Estilo claro como la foto de referencia: fondo marfil, tarjetas blancas,
+# titulo serif vino, iconos grandes dibujados.
+FONDO = (244, 241, 235)
+TARJETA = (255, 255, 255)
+BORDE = (225, 218, 208)
+TINTA = (62, 32, 32)
+TINTA_SUAVE = (130, 110, 110)
+TINTA_TENUE = (170, 155, 150)
+ACENTO = (122, 30, 35)
+ACENTO_CLARO = (150, 45, 50)
+VERDE = (63, 160, 120)
+AMBAR = (200, 140, 60)
+ROJO = (190, 70, 60)
 
-FONDO = (18, 22, 28)
-TARJETA = (27, 34, 43)
-BORDE = (42, 52, 63)
-TINTA = (230, 235, 240)
-TINTA_SUAVE = (143, 160, 176)
-TINTA_TENUE = (100, 115, 130)
-ACENTO = (76, 155, 232)
-VERDE = (63, 191, 143)
-AMBAR = (224, 166, 75)
-ROJO = (224, 101, 91)
-
-# Familias por plataforma; SysFont acepta la lista y toma la primera que exista.
+# Titulo serif como la foto, cuerpo sans limpio.
+FAM_TITULO = "georgia,timesnewroman,times,serif"
 FAM = "segoeui,helveticaneue,helvetica,arial,dejavusans"
 FAM_MONO = "menlo,consolas,dejavusansmono,couriernew,monospace"
 
-ARCHIVO_AVATAR = os.path.join(H.BASE, "avatar_config.json")
+BASE_PROYECTO = os.path.dirname(H.BASE)
+ARCHIVO_AVATAR = os.path.join(BASE_PROYECTO, "avatar_config.json")
 ARCHIVO_STEREO = os.path.join(H.CARPETA_CALIBRACION, "stereo.npz")
 
 # Minimo de pares que generar_calibracion.py exige para siquiera intentarlo.
 MIN_PARES = 10
+
+
+def leer_rechazo():
+    """Texto del ultimo rechazo de calibracion, o None si no hay."""
+    ruta = os.path.join(H.CARPETA_CALIBRACION, "ultimo_rechazo.txt")
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def limpiar_rechazo():
+    try:
+        os.remove(os.path.join(H.CARPETA_CALIBRACION, "ultimo_rechazo.txt"))
+    except OSError:
+        pass
 
 
 # ==========================================
@@ -114,7 +130,7 @@ def probar_camaras():
     import cv2
 
     partes = []
-    for i in (1, 2):
+    for i in (0, 1):
         cap = cv2.VideoCapture(i, H.BACKEND_CAMARA)
         ok, frame = (False, None)
         if cap.isOpened():
@@ -141,7 +157,8 @@ class UI:
         self.p = pantalla
         self.click = None
         self.mouse = (0, 0)
-        self.f_titulo = pygame.font.SysFont(FAM, 24, bold=True)
+        self.f_titulo = pygame.font.SysFont(FAM_TITULO, 34, bold=True)
+        self.f_sub = pygame.font.SysFont(FAM, 14)
         self.f_paso = pygame.font.SysFont(FAM, 17, bold=True)
         self.f = pygame.font.SysFont(FAM, 13)
         self.f_bold = pygame.font.SysFont(FAM, 13, bold=True)
@@ -158,8 +175,45 @@ class UI:
         return r
 
     def tarjeta(self, x, y, w, h):
-        pygame.draw.rect(self.p, TARJETA, (x, y, w, h), border_radius=10)
-        pygame.draw.rect(self.p, BORDE, (x, y, w, h), 1, border_radius=10)
+        # Sombra suave + tarjeta blanca como la foto.
+        # Si el cursor esta sobre la card, sombra mas grande = efecto elevado.
+        hover = pygame.Rect(x, y, w, h).collidepoint(self.mouse)
+        if hover:
+            pygame.draw.rect(self.p, (215, 205, 190), (x + 5, y + 9, w, h), border_radius=12)
+            pygame.draw.rect(self.p, (222, 212, 198), (x + 2, y + 6, w, h), border_radius=12)
+        else:
+            pygame.draw.rect(self.p, (230, 222, 210), (x + 3, y + 4, w, h), border_radius=12)
+        pygame.draw.rect(self.p, TARJETA, (x, y, w, h), border_radius=12)
+        pygame.draw.rect(self.p, ACENTO if hover else BORDE, (x, y, w, h),
+                         2 if hover else 1, border_radius=12)
+
+    def icono_grande(self, tipo, cx, cy):
+        """Icono grande dibujado (no depende de emojis de la fuente)."""
+        vino, gris = ACENTO, (200, 185, 175)
+        if tipo == "tablero":
+            s, ox, oy = 13, cx - 19, cy - 19
+            for r in range(3):
+                for c in range(3):
+                    col = vino if (r + c) % 2 == 0 else gris
+                    pygame.draw.rect(self.p, col, (ox + c * s, oy + r * s, s, s), border_radius=2)
+        elif tipo == "captura":
+            pygame.draw.rect(self.p, vino, (cx - 26, cy - 14, 52, 32), border_radius=8)
+            pygame.draw.circle(self.p, (255, 255, 255), (cx, cy + 2), 11)
+            pygame.draw.circle(self.p, vino, (cx, cy + 2), 6)
+            pygame.draw.rect(self.p, vino, (cx - 10, cy - 22, 20, 8), border_radius=3)
+        elif tipo == "calib":
+            pygame.draw.circle(self.p, vino, (cx, cy), 16, 4)
+            pygame.draw.circle(self.p, vino, (cx, cy), 5)
+            for a in (0, 60, 120, 180, 240, 300):
+                import math
+                x1 = cx + 16 * math.cos(math.radians(a))
+                y1 = cy + 16 * math.sin(math.radians(a))
+                x2 = cx + 23 * math.cos(math.radians(a))
+                y2 = cy + 23 * math.sin(math.radians(a))
+                pygame.draw.line(self.p, vino, (x1, y1), (x2, y2), 4)
+        elif tipo == "sesion":
+            pygame.draw.circle(self.p, vino, (cx, cy - 10), 10)
+            pygame.draw.rect(self.p, vino, (cx - 13, cy + 4, 26, 20), border_radius=8)
 
     def marca(self, cx, cy, estado):
         """Circulo de estado: 'ok', 'medio', 'falta' o 'error'."""
@@ -179,24 +233,22 @@ class UI:
         """Dibuja el boton y devuelve True si se le hizo click este cuadro."""
         r = pygame.Rect(rect)
         encima = r.collidepoint(self.mouse) and activo
-        base = tono or BORDE
+        base = tono or (235, 228, 218)
 
         if not activo:
-            relleno, letra = (34, 41, 50), TINTA_TENUE
+            relleno, letra = (240, 236, 230), TINTA_TENUE
         elif tono is ACENTO:
-            relleno = (96, 172, 245) if encima else ACENTO
-            letra = (12, 20, 30)
+            relleno = ACENTO_CLARO if encima else ACENTO
+            letra = (255, 255, 255)
         elif tono is ROJO:
-            # Fondo oscuro con letra y borde rojos: relleno rojo mas letra roja
-            # deja el boton en blanco, que es como quedo la primera version.
-            relleno, letra = ((66, 38, 38) if encima else (48, 31, 33)), ROJO
+            relleno = (250, 225, 220) if encima else (248, 235, 232)
+            letra = ROJO
         else:
-            relleno = tuple(min(255, c + 18) for c in base) if encima else base
+            relleno = (250, 246, 240) if encima else base
             letra = TINTA
 
-        pygame.draw.rect(self.p, relleno, r, border_radius=7)
-        if tono is ROJO and activo:
-            pygame.draw.rect(self.p, ROJO, r, 1, border_radius=7)
+        pygame.draw.rect(self.p, relleno, r, border_radius=8)
+        pygame.draw.rect(self.p, ACENTO if tono is ACENTO else BORDE, r, 1, border_radius=8)
 
         img = self.f_bold.render(etiqueta, True, letra)
         self.p.blit(img, img.get_rect(center=r.center))
@@ -214,7 +266,7 @@ class UI:
         return min(alto, max(bajo, nuevo)), x + 26 + ancho_val + 26
 
     def barra(self, x, y, w, h, frac, color):
-        pygame.draw.rect(self.p, (44, 53, 64), (x, y, w, h), border_radius=h // 2)
+        pygame.draw.rect(self.p, (235, 228, 218), (x, y, w, h), border_radius=h // 2)
         if frac > 0:
             pygame.draw.rect(self.p, color, (x, y, max(h, int(w * min(1.0, frac))), h),
                              border_radius=h // 2)
@@ -231,8 +283,8 @@ class Menu:
         self.mensaje = "AVISO: " + avisos[0] if avisos else ""
 
         pygame.init()
-        self.pantalla = pygame.display.set_mode((ANCHO, self.alto_necesario()))
-        pygame.display.set_caption("BodySense")
+        self.pantalla = pygame.display.set_mode((ANCHO, ALTO))
+        pygame.display.set_caption("BodySense V1")
         self.ui = UI(self.pantalla)
         self.reloj = pygame.time.Clock()
 
@@ -240,23 +292,22 @@ class Menu:
         self.proc_nombre = ""
         self.ocupado = False
         self.confirmar_borrado = False
+        self.usuario = ""
+        self.es_entrenador = False
+        self.editando_usuario = False
+        self.rechazo = None
         self.refrescar()
 
     # --- estado ---
     def alto_necesario(self):
-        """Alto exacto de la ventana para el estado actual.
-
-        Suma los mismos altos que se dibujan, asi que plegar el paso 1 no
-        puede dejar un hueco muerto al final ni recortar el mensaje.
-        """
-        t1 = ALTO_T1_PLEGADO if self.cfg["tablero_plegado"] else ALTO_T1_ABIERTO
-        return (Y_INICIO + t1 + ALTO_T2 + ALTO_T3 + ALTO_T4
-                + SEPARACION * 3 + ALTO_PIE)
+        return ALTO
 
     def refrescar(self):
         self.pares = len(H.pares_de_capturas())
         self.calib = leer_calibracion()
         self.avatar_nombre, self.avatar_color = leer_avatar()
+        if not self.usuario:
+            self.usuario = self.avatar_nombre
 
     def guardar(self, clave, valor):
         self.cfg[clave] = valor
@@ -273,22 +324,32 @@ class Menu:
         """
         if self.proc is not None and self.proc.poll() is not None:
             codigo = self.proc.returncode
+            nombre = self.proc_nombre
             self.proc = None
             self.refrescar()
-            self.mensaje = (f"{self.proc_nombre} termino."
+            self.mensaje = (f"{nombre} termino."
                             if codigo == 0 else
-                            f"{self.proc_nombre} salio con codigo {codigo}.")
+                            f"{nombre} salio con codigo {codigo}.")
+            if nombre.startswith("generar") and codigo != 0:
+                txt = leer_rechazo()
+                if txt:
+                    self.rechazo = txt
         self.ocupado = self.proc is not None
 
-    def lanzar(self, script):
+    def lanzar(self, script, args=None):
         """Corre un script en su propio proceso.
 
         Con Popen el menu sigue respondiendo, y mientras haya uno corriendo se
         apagan los botones: dos procesos peleandose por las camaras es el
         error que mas facil se comete con un menu de botones.
         """
-        self.proc = subprocess.Popen([sys.executable, os.path.join(H.BASE, script)],
-                                     cwd=H.BASE)
+        ruta = H.buscar_archivo_desesperadamente(script)
+        if not ruta:
+            self.mensaje = f"No se encontro {script}."
+            return
+        cmd = [sys.executable, ruta] + list(args or [])
+        self.proc = subprocess.Popen(cmd,
+                                     cwd=os.path.dirname(ruta))
         self.proc_nombre = script
         self.mensaje = f"Corriendo {script}... revisa su ventana."
 
@@ -303,153 +364,126 @@ class Menu:
             self.mensaje = f"No se pudo borrar: {e}"
         self.refrescar()
 
-    # --- dibujo ---
-    def paso_tablero(self, y):
-        u, w = self.ui, ANCHO - 48
+    # --- tarjetas grandes estilo menu ---
+    def card_head(self, x, y, w, icono, num, titulo, estado):
+        u = self.ui
+        u.marca(x + 26, y + 26, estado)
+        u.texto(num, x + 52, y + 15, TINTA_TENUE, u.f_paso)
+        u.texto(titulo, x + 76, y + 15, TINTA, u.f_paso)
+        u.icono_grande(icono, x + w - 44, y + 34)
+
+    def paso_tablero(self, x, y, w, h):
+        u = self.ui
         cols, filas = self.cfg["checkerboard"]
-        resumen = f"{cols}×{filas} esquinas · {self.cfg['tamano_cuadro_mm']:g} mm"
+        tipo = self.cfg.get("tablero_tipo", "ajedrez")
+        es_aj = tipo == "ajedrez"
+        if tipo == "charuco":
+            cc = self.cfg.get("charuco_cuadros", [5, 7])
+            resumen = f"charuco {cc[0]}x{cc[1]}"
+        else:
+            resumen = f"ajedrez {cols}x{filas}"
 
-        # Plegado: una linea. Medir el tablero se hace una vez y este paso no
-        # bloquea ningun otro, asi que no tiene por que ocupar media pantalla.
-        if self.cfg["tablero_plegado"]:
-            h = ALTO_T1_PLEGADO
-            u.tarjeta(24, y, w, h)
-            u.marca(50, y + 26, "ok")
-            u.texto("1", 68, y + 17, TINTA_TENUE, u.f_paso)
-            u.texto("Tablero", 88, y + 17, TINTA, u.f_paso)
-            u.texto(resumen, 168, y + 20, TINTA_SUAVE, u.mono)
-            if u.boton((w - 84, y + 15, 108, 24), "Cambiar"):
-                self.guardar("tablero_plegado", False)
-            return y + h + SEPARACION
-
-        h = ALTO_T1_ABIERTO
-        u.tarjeta(24, y, w, h)
-        u.marca(50, y + 26, "ok")
-        u.texto("1", 68, y + 15, TINTA_TENUE, u.f_paso)
-        u.texto("Medir el tablero", 88, y + 15, TINTA, u.f_paso)
-        u.texto("El tamano del cuadro fija la escala metrica de todo el sistema.",
-                88, y + 38, TINTA_SUAVE, u.f_chico)
-        if u.boton((w - 84, y + 12, 108, 22), "Omitir paso"):
-            self.guardar("tablero_plegado", True)
-
-        u.texto("Esquinas internas", 88, y + 66, TINTA_SUAVE, u.f)
-        nc, x = u.stepper(210, y + 61, cols, 1, 3, 20, str(cols), 34)
-        u.texto("×", x + 6, y + 64, TINTA_TENUE, u.f)
-        nf, _ = u.stepper(x + 20, y + 61, filas, 1, 3, 20, str(filas), 34)
+        u.tarjeta(x, y, w, h)
+        self.card_head(x, y, w, "tablero", "1", "Tablero  " + resumen, "ok")
+        u.texto("Tipo de tablero", x + 24, y + 52, TINTA_SUAVE, u.f_chico)
+        if u.boton((x + 24, y + 72, 200, 40), "Ajedrez", not self.ocupado,
+                   tono=None if es_aj else None):
+            if not es_aj:
+                self.guardar("tablero_tipo", "ajedrez")
+        if u.boton((x + 232, y + 72, 200, 40), "Charuco", not self.ocupado):
+            if es_aj:
+                self.guardar("tablero_tipo", "charuco")
+        u.texto("Esquinas", x + 24, y + 128, TINTA_SUAVE, u.f)
+        nc, nx = u.stepper(x + 110, y + 123, cols, 1, 3, 20, str(cols), 34)
+        nf, _ = u.stepper(nx + 20, y + 123, filas, 1, 3, 20, str(filas), 34)
         if (nc, nf) != (cols, filas):
             self.guardar("checkerboard", [nc, nf])
-
-        u.texto("Cuadro", 88, y + 94, TINTA_SUAVE, u.f)
+        u.texto("Cuadro", x + 24, y + 156, TINTA_SUAVE, u.f)
         mm = self.cfg["tamano_cuadro_mm"]
-        nmm, _ = u.stepper(210, y + 89, mm, 1.0, 1.0, 500.0, f"{mm:g} mm")
+        nmm, _ = u.stepper(x + 110, y + 151, mm, 1.0, 1.0, 500.0, f"{mm:g} mm")
         if nmm != mm:
             self.guardar("tamano_cuadro_mm", nmm)
+        if u.boton((x + 24, y + h - 48, w - 48, 36), "Medir con camara", not self.ocupado, ACENTO):
+            self.lanzar("medir_charuco.py" if tipo == "charuco" else "medir_tablero.py")
 
-        if u.boton((w - 132, y + 70, 156, 34), "Medir con camara", not self.ocupado):
-            self.lanzar("medir_tablero.py")
-        return y + h + SEPARACION
-
-    def paso_capturas(self, y):
-        u, w, h = self.ui, ANCHO - 48, ALTO_T2
+    def paso_capturas(self, x, y, w, h):
+        u = self.ui
         meta = self.cfg["total_fotos"]
-        u.tarjeta(24, y, w, h)
-        u.marca(50, y + 26, "ok" if self.pares >= MIN_PARES
-                else "medio" if self.pares else "falta")
-        u.texto("2", 68, y + 15, TINTA_TENUE, u.f_paso)
-        u.texto("Capturar fotos del tablero", 88, y + 15, TINTA, u.f_paso)
-
-        u.texto(f"{self.pares} de {meta} pares", 88, y + 40, TINTA, u.mono)
-        u.barra(88, y + 60, 300, 8, self.pares / max(1, meta),
+        u.tarjeta(x, y, w, h)
+        self.card_head(x, y, w, "captura", "2", "Capturar",
+                       "ok" if self.pares >= MIN_PARES else "medio" if self.pares else "falta")
+        u.texto(f"{self.pares} de {meta} pares", x + 24, y + 52, TINTA, u.mono)
+        u.barra(x + 24, y + 74, w - 48, 10, self.pares / max(1, meta),
                 VERDE if self.pares >= MIN_PARES else AMBAR)
-        if self.pares < MIN_PARES:
-            u.texto(f"generar_calibracion.py pide {MIN_PARES} minimo",
-                    398, y + 57, TINTA_TENUE, u.f_chico)
-
-        u.texto("Meta", 88, y + 82, TINTA_SUAVE, u.f)
-        nm, _ = u.stepper(150, y + 77, meta, 5, 10, 200, str(meta), 40)
+        u.texto("Meta", x + 24, y + 96, TINTA_SUAVE, u.f)
+        nm, _ = u.stepper(x + 80, y + 91, meta, 5, 10, 200, str(meta), 40)
         if nm != meta:
             self.guardar("total_fotos", nm)
-
-        u.texto("Tamano minimo", 260, y + 82, TINTA_SUAVE, u.f)
-        mi = self.cfg["min_ancho_tablero"]
-        nmi, _ = u.stepper(370, y + 77, round(mi, 2), 0.01, 0.02, 0.90,
-                           f"{mi * 100:.0f}%", 46)
-        if abs(nmi - mi) > 1e-9:
-            self.guardar("min_ancho_tablero", round(nmi, 2))
-
         libre = not self.ocupado
-        if u.boton((88, y + 112, 120, 26), "Capturar", libre):
-            self.lanzar("capturar.py")
-        if u.boton((216, y + 112, 130, 26), "Probar camaras", libre):
+        if u.boton((x + 24, y + 130, w - 48, 40), "Capturar fotos", libre, ACENTO):
+            self.lanzar("capturar.py", [self.cfg.get("tablero_tipo", "ajedrez")])
+        if u.boton((x + 24, y + 176, (w - 56) // 2, 32), "Probar", libre):
             self.mensaje = probar_camaras()
-        if u.boton((w - 84, y + 112, 108, 26), "Borrar fotos",
+        if u.boton((x + 32 + (w - 56) // 2, y + 176, (w - 56) // 2, 32), "Borrar",
                    libre and self.pares > 0, ROJO):
             self.confirmar_borrado = True
-        return y + h + SEPARACION
 
-    def paso_calibracion(self, y):
-        u, w, h = self.ui, ANCHO - 48, ALTO_T3
+    def paso_calibracion(self, x, y, w, h):
+        u = self.ui
         c = self.calib
         estado = ("falta" if c is None else "error" if "error" in c
                   else "ok" if c["creible"] else "medio")
-        u.tarjeta(24, y, w, h)
-        u.marca(50, y + 26, estado)
-        u.texto("3", 68, y + 15, TINTA_TENUE, u.f_paso)
-        u.texto("Generar la calibracion", 88, y + 15, TINTA, u.f_paso)
-
+        u.tarjeta(x, y, w, h)
+        self.card_head(x, y, w, "calib", "3", "Calibrar", estado)
         if c is None:
-            u.texto("No hay stereo.npz todavia.", 88, y + 40, TINTA_SUAVE, u.f)
-            u.texto("main.py no puede correr sin el.", 88, y + 60, TINTA_TENUE, u.f_chico)
+            u.texto("Sin stereo.npz. Captura 10+ pares primero.",
+                    x + 24, y + 56, TINTA_SUAVE, u.f)
         elif "error" in c:
-            u.texto("stereo.npz existe pero no se puede leer.", 88, y + 40, ROJO, u.f)
-            u.texto(c["error"][:74], 88, y + 60, TINTA_TENUE, u.f_chico)
+            u.texto("stereo.npz ilegible.", x + 24, y + 56, ROJO, u.f)
+            u.texto(c["error"][:52], x + 24, y + 78, TINTA_TENUE, u.f_chico)
         else:
-            u.texto(time.strftime("%d %b %Y  %H:%M", c["fecha"]), 88, y + 40,
-                    TINTA, u.mono)
-            u.texto(f"FOV {c['fovs'][0]:.0f}° / {c['fovs'][1]:.0f}°"
-                    f"    baseline {c['baseline']:.0f} mm"
-                    f"    calibrada a {c['anchos'][0]:.0f} y {c['anchos'][1]:.0f} px",
-                    88, y + 62, TINTA_SUAVE, u.mono_chico)
-            if c["creible"]:
-                u.texto("Campo de vision creible.", 88, y + 82, VERDE, u.f_chico)
-            else:
-                # Dos lineas: en una sola el texto se metia debajo del boton.
-                u.texto("CAMPO DE VISION IMPLAUSIBLE - quedo mal condicionada.",
-                        88, y + 80, AMBAR, u.f_chico)
-                u.texto("Recaptura con el tablero mas grande y mas inclinado.",
-                        88, y + 96, TINTA_SUAVE, u.f_chico)
-
+            u.texto(time.strftime("%d %b %H:%M", c["fecha"]), x + 24, y + 52, TINTA, u.mono)
+            u.texto(f"FOV {c['fovs'][0]:.0f} / {c['fovs'][1]:.0f}  base {c['baseline']:.0f}mm",
+                    x + 24, y + 76, TINTA_SUAVE, u.f_chico)
+            u.texto("Creible." if c["creible"] else "IMPLAUSIBLE: recaptura.",
+                    x + 24, y + 98, VERDE if c["creible"] else AMBAR, u.f_chico)
         listo = self.pares >= MIN_PARES and not self.ocupado
-        etiqueta = "Regenerar" if c else "Generar"
-        if u.boton((w - 108, y + 58, 132, 34), etiqueta, listo):
-            self.lanzar("generar_calibracion.py")
-        if self.pares < MIN_PARES:
-            u.texto("faltan fotos", w - 42, y + 94, TINTA_TENUE, u.f_chico, True)
-        return y + h + SEPARACION
+        etiqueta = "Regenerar calibracion" if c else "Generar calibracion"
+        if u.boton((x + 24, y + h - 48, w - 48, 36), etiqueta, listo, ACENTO):
+            tipo = self.cfg.get("tablero_tipo", "ajedrez")
+            self.lanzar("generar_calibracion.py", ["charuco"] if tipo == "charuco" else [])
 
-    def paso_ejecutar(self, y):
-        u, w, h = self.ui, ANCHO - 48, ALTO_T4
-        u.tarjeta(24, y, w, h)
+    def paso_ejecutar(self, x, y, w, h):
+        u = self.ui
+        u.tarjeta(x, y, w, h)
         hay = self.calib is not None and "error" not in self.calib
-        u.marca(50, y + 26, "ok" if hay else "falta")
-        u.texto("4", 68, y + 15, TINTA_TENUE, u.f_paso)
-        u.texto("Ver el esqueleto 3D", 88, y + 15, TINTA, u.f_paso)
-
-        u.texto("Avatar", 88, y + 42, TINTA_SUAVE, u.f)
-        pygame.draw.rect(self.pantalla, self.avatar_color, (140, y + 42, 16, 16),
-                         border_radius=4)
-        u.texto(self.avatar_nombre, 164, y + 42, TINTA, u.f)
-        u.texto("Flechas giran la vista, Z y X acercan, ESC sale.",
-                88, y + 66, TINTA_TENUE, u.f_chico)
-
+        self.card_head(x, y, w, "sesion", "4", "Sesion",
+                       "ok" if hay else "falta")
+        u.texto("Usuario", x + 24, y + 54, TINTA_SUAVE, u.f)
+        caja = pygame.Rect(x + 100, y + 50, 180, 28)
+        pygame.draw.rect(self.pantalla, (36, 48, 62) if self.editando_usuario else (18, 22, 28),
+                         caja, border_radius=6)
+        pygame.draw.rect(self.pantalla, ACENTO if self.editando_usuario else BORDE,
+                         caja, 1, border_radius=6)
+        u.texto(self.usuario or "nombre...", x + 108, y + 56, TINTA, u.mono)
+        if self.ui.click and caja.collidepoint(self.ui.click):
+            self.editando_usuario = True
+        etiqueta_check = "[x] Entrenador" if self.es_entrenador else "[ ] Entrenador"
+        if u.boton((x + 290, y + 50, 150, 28), etiqueta_check, not self.ocupado):
+            self.es_entrenador = not self.es_entrenador
+            self.editando_usuario = False
+        u.texto("ESPACIO graba/pausa, ESC sale.", x + 24, y + 88, TINTA_TENUE, u.f_chico)
         libre = not self.ocupado
-        if u.boton((88, y + 88, 148, 26), "Configurar avatar", libre):
-            self.lanzar("menu.py")
-        if u.boton((248, y + 88, 150, 26), "Probar sin camaras", libre):
-            self.lanzar("probar_render.py")
-        if u.boton((w - 84, y + 82, 108, 36), "EJECUTAR", hay and libre, ACENTO):
-            self.lanzar("main.py")
-        return y + h
+        nombre = (self.usuario or "Jugador 1").strip() or "Jugador 1"
+        if u.boton((x + 24, y + 112, w - 48, 40), "Grabar referencia", hay and libre, ACENTO):
+            self.editando_usuario = False
+            self.lanzar("main.py", ["--usuario", nombre, "--referencia"])
+        if u.boton((x + 24, y + 158, (w - 56) // 2, 36), "Practicar", hay and libre):
+            self.editando_usuario = False
+            self.lanzar("main.py", ["--usuario", nombre])
+        if u.boton((x + 32 + (w - 56) // 2, y + 158, (w - 56) // 2, 36), "Solo ver", hay and libre):
+            self.editando_usuario = False
+            self.lanzar("main.py", ["--usuario", nombre, "--sin-grabar"])
 
     def dialogo_borrado(self):
         u = self.ui
@@ -471,26 +505,60 @@ class Menu:
         if u.boton((x + 196, y + 112, 130, 34), "Cancelar"):
             self.confirmar_borrado = False
 
+    def dialogo_rechazo(self):
+        u = self.ui
+        velo = pygame.Surface(self.pantalla.get_size(), pygame.SRCALPHA)
+        velo.fill((10, 13, 17, 205))
+        self.pantalla.blit(velo, (0, 0))
+
+        x, y, w, h = 90, 120, 820, 460
+        pygame.draw.rect(self.pantalla, (255, 255, 255), (x, y, w, h), border_radius=12)
+        pygame.draw.rect(self.pantalla, ROJO, (x, y, w, h), 2, border_radius=12)
+        u.texto("Calibracion rechazada: esta muy mal", x + 26, y + 18, ROJO, u.f_paso)
+        u.texto("Asi se distorsionaria el avatar. No se guardo nada.",
+                x + 26, y + 44, TINTA_SUAVE, u.f_chico)
+        lineas = (self.rechazo or "").splitlines()[:9]
+        yy = y + 72
+        for ln in lineas:
+            u.texto(ln[:100], x + 26, yy, TINTA, u.f_chico)
+            yy += 20
+        u.texto("Tip rapido: 15+ pares, tablero al 30-60%, inclinalo en todas direcciones,",
+                x + 26, y + h - 72, TINTA_SUAVE, u.f_chico)
+        u.texto("camaras paralelas y misma resolucion.",
+                x + 26, y + h - 54, TINTA_SUAVE, u.f_chico)
+        if u.boton((x + w - 176, y + h - 44, 150, 32), "Entendido", True, ACENTO):
+            self.rechazo = None
+            limpiar_rechazo()
+            self.refrescar()
+
     def dibujar(self):
         u = self.ui
         self.pantalla.fill(FONDO)
-        u.texto("BodySense", 24, 22, TINTA, u.f_titulo)
-        u.texto("Flujo de calibracion", 24, 52, TINTA_SUAVE, u.f)
-        # El resumen del tablero no se repite aqui: el paso 1 lo muestra
-        # siempre, plegado o no, y esta a dos centimetros de distancia.
+        u.texto("BodySense V1", 24, 12, TINTA, u.f_titulo)
+        u.texto("Toca una tarjeta: 1 tablero, 2 fotos, 3 calibrar, 4 sesion",
+                26, 50, TINTA_SUAVE, u.f_sub)
         if self.ocupado:
-            u.texto(f"corriendo {self.proc_nombre}", ANCHO - 24, 34, AMBAR,
+            u.texto(f"corriendo {self.proc_nombre}", ANCHO - 24, 30, AMBAR,
                     u.f_chico, True)
 
-        y = Y_INICIO
-        y = self.paso_tablero(y)
-        y = self.paso_capturas(y)
-        y = self.paso_calibracion(y)
-        y = self.paso_ejecutar(y)
+        x0, y0 = MARGEN, Y_TITULO
+        x1 = x0 + CARD_W + GAP
+        y1 = y0 + CARD_H + GAP
+        # Efecto elevado: la card bajo el cursor sube 5 px.
+        import pygame as _pg
+        m = self.ui.mouse
+        dy0 = -5 if _pg.Rect(x0, y0, CARD_W, CARD_H).collidepoint(m) else 0
+        dy1 = -5 if _pg.Rect(x1, y0, CARD_W, CARD_H).collidepoint(m) else 0
+        dy2 = -5 if _pg.Rect(x0, y1, CARD_W, CARD_H).collidepoint(m) else 0
+        dy3 = -5 if _pg.Rect(x1, y1, CARD_W, CARD_H).collidepoint(m) else 0
+        self.paso_tablero(x0, y0 + dy0, CARD_W, CARD_H)
+        self.paso_capturas(x1, y0 + dy1, CARD_W, CARD_H)
+        self.paso_calibracion(x0, y1 + dy2, CARD_W, CARD_H)
+        self.paso_ejecutar(x1, y1 + dy3, CARD_W, CARD_H)
 
         if self.mensaje:
             color = ROJO if self.mensaje.startswith(("AVISO", "No se pudo")) else TINTA_SUAVE
-            u.texto(self.mensaje[:96], 24, y + 16, color, u.f_chico)
+            u.texto(self.mensaje[:120], 24, ALTO - 28, color, u.f_chico)
 
     def correr(self):
         andando = True
@@ -501,23 +569,35 @@ class Menu:
                 if ev.type == pygame.QUIT:
                     andando = False
                 elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-                    if self.confirmar_borrado:
+                    if self.rechazo:
+                        self.rechazo = None
+                        limpiar_rechazo()
+                        self.refrescar()
+                    elif self.editando_usuario:
+                        self.editando_usuario = False
+                    elif self.confirmar_borrado:
                         self.confirmar_borrado = False
                     else:
                         andando = False
+                elif ev.type == pygame.KEYDOWN and self.editando_usuario:
+                    if ev.key == pygame.K_RETURN or ev.key == pygame.K_KP_ENTER:
+                        self.editando_usuario = False
+                    elif ev.key == pygame.K_BACKSPACE:
+                        self.usuario = self.usuario[:-1]
+                    elif ev.unicode and len(self.usuario) < 24:
+                        self.usuario += ev.unicode
                 elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                     self.ui.click = ev.pos
 
             self.actualizar_proceso()
 
-            # Solo al plegar o desplegar el paso 1. Recrear la ventana cada
-            # cuadro parpadearia.
-            alto = self.alto_necesario()
-            if self.pantalla.get_height() != alto:
-                self.pantalla = pygame.display.set_mode((ANCHO, alto))
-                self.ui.p = self.pantalla
-
-            if self.confirmar_borrado:
+            if self.rechazo:
+                click = self.ui.click
+                self.ui.click = None
+                self.dibujar()
+                self.ui.click = click
+                self.dialogo_rechazo()
+            elif self.confirmar_borrado:
                 # El dialogo se traga los clicks: el fondo se redibuja sin
                 # ellos para que no se pueda apretar "Capturar" por detras.
                 click = self.ui.click

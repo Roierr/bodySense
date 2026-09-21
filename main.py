@@ -5,19 +5,55 @@ from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
 import numpy as np
+import argparse
 import json
 import sys
+import time
 
 # === Importo los archivos ===
-from Herramientas import buscar_archivo_desesperadamente, BACKEND_CAMARA
-from Graficos import dibujar_hueso, dibujar_joint, dibujar_cabeza
+from utils.Herramientas import buscar_archivo_desesperadamente, BACKEND_CAMARA
+from visualizacion import dibujar_hueso, dibujar_joint, dibujar_cabeza
+from registro import abrir_bd, crear_usuario, marcar_referencia, comparar_con_referencia, metricas_posturales, Sesion
 
 # ==========================================
 # MAIN
 # ==========================================
 def main():
+    ap = argparse.ArgumentParser(description="BodySense 3D + sesion V1")
+    ap.add_argument("--usuario", default="Jugador 1", help="nombre en la base local")
+    ap.add_argument("--referencia", action="store_true",
+                    help="guarda esta sesion como referencia del entrenador")
+    ap.add_argument("--sin-grabar", action="store_true",
+                    help="solo ver sin guardar en la base")
+    args = ap.parse_args()
+
+    con = None
+    usuario_id = None
+    sesion = None
+    if not args.sin_grabar:
+        con = abrir_bd()
+        usuario_id = crear_usuario(con, args.usuario)
+        sesion = Sesion(con, usuario_id)
+        modo_txt = "REFERENCIA (entrenador)" if args.referencia else "PRACTICA"
+        print(f"Sesion {sesion.id} para '{args.usuario}' modo {modo_txt}")
+    else:
+        print("Modo solo-ver, no se guarda.")
+
+    # Cuenta atras para acomodarse: aqui NO se graba nada.
+    for i in (3, 2, 1):
+        print(f"Preparate... {i}")
+        time.sleep(1.0)
+    print("Pulsa ESPACIO para empezar a grabar, otra vez para pausar, ESC para salir.")
+
+    grabando = False
+    t0 = time.time()
+
     stereo = buscar_archivo_desesperadamente("stereo.npz")
-    if not stereo: print("\nERROR: Falta stereo.npz"); return
+    if not stereo:
+        print("\nERROR: Falta stereo.npz")
+        if sesion is not None:
+            sesion.cerrar()
+        return
     
     st = np.load(stereo, allow_pickle=True)
     PL = st["mtx1"] @ np.hstack((np.eye(3), np.zeros((3,1))))
@@ -60,8 +96,14 @@ def main():
     elevacion = 0.0    # grados sobre el horizonte
     distancia = 900.0  # unidades de la camara virtual al centro del avatar
 
-    #  Establezco la confianza mínima (0.1) que un punto corporal detectado por MediaPipe debe tener en ambas cámaras para ser considerado válido y usado en la reconstrucción 3D.
-    TOLERANCIA_VISIBILIDAD = 0.1 
+    # Candados anti-chicle: si la persona se sale o hace algo raro,
+    # MediaPipe inventa puntos y la triangulacion los manda a metros.
+    # Regla: mejor congelar que mostrar un avatar roto.
+    TOLERANCIA_VISIBILIDAD = 0.5
+    MIN_PUNTOS = 8
+    Z_MIN, Z_MAX = 500.0, 5000.0
+    LIMITE_XY = 4000.0
+    MAX_ESTIRON = 3.0
 
 # Configuro MediaPipe Pose y las cámaras
     mp_pose = mp.solutions.pose
@@ -70,9 +112,20 @@ def main():
     pose1 = mp_pose.Pose(min_detection_confidence=0.4, min_tracking_confidence=0.4, model_complexity=0)
     
     
-    cap0 = cv2.VideoCapture(1, BACKEND_CAMARA); cap1 = cv2.VideoCapture(2, BACKEND_CAMARA)
+    # Estereo real: dos indices distintos. 0 y 1 en esta PC; 2 no existe en DSHOW.
+    # No abrir dos veces el mismo indice: eso duplica la imagen y la
+    # triangulacion da profundidad falsa.
+    cap0 = cv2.VideoCapture(0, BACKEND_CAMARA); cap1 = cv2.VideoCapture(1, BACKEND_CAMARA)
     if not cap0.isOpened() or not cap1.isOpened():
-        print("\nERROR: No se detectan las dos camaras."); pygame.quit(); return
+        print("\nERROR: No se detectan las dos camaras.")
+        pygame.quit()
+        if sesion is not None:
+            sesion.cerrar()
+        return
+    cap0.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)
+    cap0.set(cv2.CAP_PROP_EXPOSURE, -4.0)
+    cap1.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)
+    cap1.set(cv2.CAP_PROP_EXPOSURE, -4.0)
     
     #Esto es para ver el avatar mas grande en la pantalla
     ESCALA_GIGANTE = 1.5
@@ -85,15 +138,27 @@ def main():
     # caderas del sujeto y no contiene la posicion absoluta.
     dist_camara = None
     pivote = None      # punto de la sala que la vista orbita, se ancla una vez
+    ultima_buena = None  # ultima pose valida para congelar en vez de distorsionar
+    largo_previo = {}    # largo de cada hueso en la ultima pose valida
+    persona_perdida = False
 
     # Bucle principal
-    while True:
+    feedback = ""
+    salir = False
+    while not salir:
         # Manejo los eventos de Pygame
         for event in pygame.event.get():
 
-            if event.type == QUIT: pygame.quit(); return
+            if event.type == QUIT: salir = True; break
             if event.type == KEYDOWN and event.key == K_ESCAPE:
-                pygame.quit(); return
+                salir = True; break
+            # ESPACIO = empezar / pausar grabacion. Asi lo parado no contamina.
+            if event.type == KEYDOWN and event.key == K_SPACE:
+                if sesion is not None:
+                    grabando = not grabando
+                    print("GRABANDO..." if grabando else "Pausado.")
+        if salir:
+            break
 
         # Giro la vista con las flechas, acerco y alejo con Z y X
         teclas = pygame.key.get_pressed()
@@ -119,6 +184,7 @@ def main():
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
 # Reconstruyo y dibujo el esqueleto 3D
+        cuadro_valido = False
         if res0.pose_landmarks and res1.pose_landmarks:
             
             lm0, lm1 = res0.pose_landmarks.landmark, res1.pose_landmarks.landmark
@@ -137,28 +203,66 @@ def main():
                     ptsR.append([lm1[i].x * w1, lm1[i].y * h1])
                     v_ids.append(i)
             
-            # Triangulo los puntos 3D si hay puntos visibles
-            if ptsL:
+            # Triangulo solo si hay suficientes puntos: con 3-4 el avatar se hace chicle.
+            if len(ptsL) >= MIN_PUNTOS:
                 p3d = cv2.triangulatePoints(PL, PR, np.array(ptsL).T, np.array(ptsR).T)
                 p3d = (p3d[:3] / p3d[3]).T
 
-                # Distancia real a las camaras ANTES de escalar para el render:
-                # la Z de la triangulacion esta en milimetros del mundo.
-                dist_camara = float(np.median(p3d[:, 2]))
+                # Candado de volumen: fuera de la sala no se dibuja.
+                dentro = [(Z_MIN < p[2] < Z_MAX and abs(p[0]) < LIMITE_XY
+                           and abs(p[1]) < LIMITE_XY) for p in p3d]
+                if sum(dentro) >= MIN_PUNTOS:
+                    v_ids = [v for v, ok in zip(v_ids, dentro) if ok]
+                    p3d = p3d[np.array(dentro)]
 
-                # Escalo el modelo 3D para una mejor visualización
-                p3d = p3d * ESCALA_GIGANTE
+                    # Distancia real a las camaras ANTES de escalar para el render:
+                    # la Z de la triangulacion esta en milimetros del mundo.
+                    dist_camara = float(np.median(p3d[:, 2]))
+
+                    # Escalo el modelo 3D para una mejor visualización
+                    p3d = p3d * ESCALA_GIGANTE
 
 # Preparo los puntos finales para dibujar
-                final_pts = {vid: [p[0], -p[1], p[2]] for vid, p in zip(v_ids, p3d)}
+                    final_pts = {vid: [p[0], -p[1], p[2]] for vid, p in zip(v_ids, p3d)}
 
+                    # Candado de huesos: un hueso no se alarga 3x de un cuadro a otro.
+                    estiron = False
+                    largos = {}
+                    for a, b in CONEXIONES:
+                        if a in final_pts and b in final_pts:
+                            pa = np.asarray(final_pts[a], dtype=float)
+                            pb = np.asarray(final_pts[b], dtype=float)
+                            largos[(a, b)] = float(np.linalg.norm(pa - pb))
+                    for k, largo in largos.items():
+                        previo = largo_previo.get(k)
+                        if previo and previo > 1e-6 and largo / previo > MAX_ESTIRON:
+                            estiron = True
+                            break
+                    if not estiron:
+                        cuadro_valido = True
+                        ultima_buena = final_pts
+                        largo_previo = largos
+
+                        # Solo se guarda cuando esta grabando (ESPACIO). Lo parado no entra.
+                        if sesion is not None and grabando:
+                            t_seg = time.time() - t0
+                            sesion.anotar(t_seg, final_pts, dist_camara)
+                            m = metricas_posturales(final_pts)
+                            if "inclinacion_tronco" in m:
+                                feedback = f"tronco {m['inclinacion_tronco']:.0f} grados"
+
+        persona_perdida = not cuadro_valido
+        dibujar_pts = ultima_buena if persona_perdida and ultima_buena else (final_pts if cuadro_valido else None)
+        fantasma = persona_perdida and ultima_buena is not None
+        if dibujar_pts:
+                color_dib = (0.6, 0.6, 0.6) if fantasma else color_final
                 # El pivote de la vista se fija UNA vez, en el primer cuerpo
                 # reconstruido, y se queda anclado a ese punto de la sala.
                 # Si siguiera al avatar, este quedaria siempre al centro de la
                 # pantalla y moverse en profundidad no se veria: justo lo que
                 # quiero demostrar.
                 if pivote is None:
-                    pivote = np.mean(list(final_pts.values()), axis=0)
+                    pivote = np.mean(list(dibujar_pts.values()), axis=0)
 
                 glLoadIdentity()
                 glTranslatef(0.0, 0.0, -distancia)
@@ -169,14 +273,14 @@ def main():
                 # Dibujo el esqueleto 3D en OpenGL
                 for a, b in CONEXIONES:
                     # Solo dibujo si ambos puntos están disponibles
-                    if a in final_pts and b in final_pts: 
-                        dibujar_hueso(final_pts[a], final_pts[b], color_final)
-                        dibujar_joint(final_pts[a], color_final)
-                        dibujar_joint(final_pts[b], color_final)
+                    if a in dibujar_pts and b in dibujar_pts: 
+                        dibujar_hueso(dibujar_pts[a], dibujar_pts[b], color_dib)
+                        dibujar_joint(dibujar_pts[a], color_dib)
+                        dibujar_joint(dibujar_pts[b], color_dib)
                 
                 # Dibujo la cabeza si el punto 0 (nariz) está disponible
-                if 0 in final_pts: 
-                    dibujar_cabeza(final_pts[0], color_final)
+                if 0 in dibujar_pts: 
+                    dibujar_cabeza(dibujar_pts[0], color_dib)
 
 # Actualizo la pantalla
         pygame.display.flip()
@@ -202,14 +306,22 @@ def main():
         # solo puede salir de la triangulacion. Sirve para demostrar en vivo
         # que el sistema mide y no estima.
         barra = np.zeros((58, panel.shape[1], 3), np.uint8)
-        if dist_camara is not None:
+        if persona_perdida:
+            cv2.putText(barra, "VUELVE AL CUADRO - persona perdida (avatar congelado)",
+                        (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+        elif sesion is not None:
+            estado = "GRABANDO" if grabando else "pausado - ESPACIO para grabar"
+            col_est = (0, 255, 0) if grabando else (0, 165, 255)
+            cv2.putText(barra, f"{estado}  cuadros:{sesion.cuadros}  {feedback}",
+                        (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, col_est, 1)
+        elif dist_camara is not None:
             cv2.putText(barra, f"distancia a las camaras: {dist_camara:.0f} mm "
                                f"({dist_camara/1000:.2f} m)",
                         (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         else:
             cv2.putText(barra, "sin reconstruccion 3D (ambas camaras deben detectar)",
                         (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 1)
-        cv2.putText(barra, "flechas giran la vista 3D  |  Z/X acercan  |  R reinicia",
+        cv2.putText(barra, "ESPACIO graba/pausa  |  flechas giran  |  Z/X acercan  |  ESC sale",
                     (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (170, 170, 170), 1)
         cv2.imshow("Camaras", np.vstack([barra, panel]))
         if cv2.waitKey(1) & 0xFF == 27: break
@@ -217,6 +329,25 @@ def main():
         # Salgo con la tecla ESC
         
     cap0.release(); cap1.release(); pygame.quit()
+    try:
+        cv2.destroyAllWindows()
+    except Exception:
+        pass
+    if sesion is not None:
+        sesion.cerrar()
+        print(f"Sesion guardada: {sesion.cuadros} cuadros. Resumen: {sesion.resumen}")
+        if sesion.cuadros < 30:
+            print("AVISO: muy pocos cuadros, quiza no hiciste el ejercicio. No se marca referencia.")
+        elif args.referencia:
+            marcar_referencia(con, usuario_id)
+            print(f"'{args.usuario}' marcado como referencia.")
+        else:
+            comp = comparar_con_referencia(con, sesion.id)
+            if not comp:
+                print("Sin referencia para comparar todavia. Pide al entrenador grabar una.")
+            else:
+                for nombre, d in comp.items():
+                    print(f"{nombre}: tu {d['valor']:.1f} vs ref {d['referencia']:.1f} (dif {d['diferencia']:+.1f})")
 
 if __name__ == "__main__":
     main()
