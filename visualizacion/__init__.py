@@ -14,4 +14,4 @@ def dibujar_joint(*args, **kwargs):
 def dibujar_cabeza(*args, **kwargs):
 	pass
 
-__all__ = ["Graficos", "probar_render"]
+__all__ = ["dibujar_hueso", "dibujar_joint", "dibujar_cabeza"]

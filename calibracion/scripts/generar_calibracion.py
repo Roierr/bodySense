@@ -62,7 +62,7 @@ for img_l_path, img_r_path in pares_validos:
         if ok_l and ok_r:
             # buscar ids comunes
             comunes = np.intersect1d(ids_l, ids_r)
-            if len(comunes) >= 4:
+            if len(comunes) >= 10:
                 # obtener puntos 3D en el orden de 'comunes'
                 pts_obj = puntos_de_charuco(board, comunes)
                 if pts_obj.ndim == 2:
@@ -159,6 +159,46 @@ for nombre, mtx, forma in (("cam0", mtx1, shape_l), ("cam1", mtx2, shape_r)):
 baseline = float(np.linalg.norm(T))
 rot = float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
 print(f"\nGeometria: separacion {baseline:.1f} mm, rotacion entre camaras {rot:.1f} grados")
+
+# Rechazo duro: no se tolera calibracion muy distorsionada.
+motivos = []
+if ret1 > 2.0 or ret2 > 2.0:
+    motivos.append(f"RMS individual alto (cam0 {ret1:.2f} / cam1 {ret2:.2f}, max 2.0). "
+                   "QUE HICISTE MAL: fotos borrosas o tablero en movimiento. "
+                   "Recaptura quieto y con buena luz.")
+if ret > 1.5:
+    motivos.append(f"RMS estereo alto ({ret:.2f}, max 1.5). "
+                   "QUE HICISTE MAL: pocas inclinaciones distintas del tablero. "
+                   "Inclinalo arriba/abajo/izq/der y acerca/aleja.")
+for nombre, mtx, forma in (("cam0", mtx1, shape_l), ("cam1", mtx2, shape_r)):
+    fov = fov_grados(mtx[0, 0], forma[0])
+    bajo, alto = RANGO_FOV_CREIBLE
+    if not (bajo < fov < alto):
+        motivos.append(f"FOV {nombre} implausible ({fov:.0f} grados). "
+                       "QUE HICISTE MAL: tablero muy chico en cuadro o muy cerca. "
+                       "Llenalo al 30-60% y recaptura.")
+if not (50.0 <= baseline <= 1500.0):
+    motivos.append(f"Separacion rara ({baseline:.0f} mm, espero 50-1500). "
+                   "QUE HICISTE MAL: las fotos no son pares sincronizados. Recaptura.")
+if rot > 10.0:
+    motivos.append(f"Camaras muy giradas ({rot:.1f} grados, max 10). "
+                   "QUE HICISTE MAL: no estan paralelas mirando al frente. Endereza.")
+if len(objpoints) < 15:
+    motivos.append(f"Pocos pares validos ({len(objpoints)}, quiero 15+). "
+                   "QUE HICISTE MAL: el tablero no se vio en ambas a la vez. Captura mas.")
+if motivos:
+    txt = "CALIBRACION RECHAZADA:\n" + "\n".join(f"- {m}" for m in motivos)
+    print("\n" + txt)
+    try:
+        with open(os.path.join(CARPETA_CALIBRACION, "ultimo_rechazo.txt"), "w", encoding="utf-8") as f:
+            f.write(txt + "\n")
+    except OSError:
+        pass
+    sys.exit(2)
+try:
+    os.remove(os.path.join(CARPETA_CALIBRACION, "ultimo_rechazo.txt"))
+except OSError:
+    pass
 
 np.savez(ARCHIVO_FINAL, mtx1=mtx1, dist1=dist1, mtx2=mtx2, dist2=dist2, R=R, T=T)
 print(f"Guardado: {ARCHIVO_FINAL}")

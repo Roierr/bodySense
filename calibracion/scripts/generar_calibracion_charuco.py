@@ -24,7 +24,9 @@ ARCHIVO_FINAL = os.path.join(CARPETA_CALIBRACION, "stereo.npz")
 ARCHIVO_REPORTE = os.path.join(CARPETA_CALIBRACION, "stereo_report_charuco.json")
 
 CUADROS_MINIMOS = 10
-MIN_IDS_COMUNES = 4
+# 4 esquinas bastan para no caerse, pero la intrinseca queda inestable.
+# 10+ esquinas por par es lo minimo para una focal creible.
+MIN_IDS_COMUNES = 10
 
 print(f"Leyendo fotos de: {CARPETA_CAPTURAS}")
 if not os.path.exists(CARPETA_CAPTURAS):
@@ -94,8 +96,38 @@ if len(objpoints) < CUADROS_MINIMOS:
     sys.exit(1)
 
 print("Calibrando cámaras individualmente...")
+if shape_l != shape_r:
+    print(f"ERROR: las camaras capturan a tamanos distintos ({shape_l} vs {shape_r}).")
+    print("Recaptura con la misma resolucion en ambas.")
+    sys.exit(1)
 ret1, mtx1, dist1, rvecs1, tvecs1 = cv2.calibrateCamera(objpoints, imgpoints_l, shape_l, None, None)
 ret2, mtx2, dist2, rvecs2, tvecs2 = cv2.calibrateCamera(objpoints, imgpoints_r, shape_r, None, None)
+
+# Descarta pares con error alto, igual que generar_calibracion.py de ajedrez.
+def _error_por_par(objp_lista, imgp_lista, rvecs, tvecs, mtx, dist):
+    errores = []
+    for k, op in enumerate(objp_lista):
+        proy, _ = cv2.projectPoints(op, rvecs[k], tvecs[k], mtx, dist)
+        errores.append(cv2.norm(imgp_lista[k], proy, cv2.NORM_L2) / len(op) ** 0.5)
+    return np.array(errores)
+
+err_l = _error_por_par(objpoints, imgpoints_l, rvecs1, tvecs1, mtx1, dist1)
+err_r = _error_por_par(objpoints, imgpoints_r, rvecs2, tvecs2, mtx2, dist2)
+peor = np.maximum(err_l, err_r)
+umbral = max(1.5, 3.0 * float(np.median(peor)))
+buenas = peor <= umbral
+if buenas.sum() < len(peor):
+    print(f"Descartando {(~buenas).sum()} de {len(peor)} pares con error alto (umbral {umbral:.2f} px)")
+    if buenas.sum() < CUADROS_MINIMOS:
+        print(f"ERROR: solo quedan {buenas.sum()} pares buenos. Vuelve a capturar.")
+        sys.exit(1)
+    objpoints = [objpoints[i] for i in range(len(buenas)) if buenas[i]]
+    imgpoints_l = [imgpoints_l[i] for i in range(len(buenas)) if buenas[i]]
+    imgpoints_r = [imgpoints_r[i] for i in range(len(buenas)) if buenas[i]]
+    print(f"Recalibrando con {len(objpoints)} pares...")
+    ret1, mtx1, dist1, _, _ = cv2.calibrateCamera(objpoints, imgpoints_l, shape_l, None, None)
+    ret2, mtx2, dist2, _, _ = cv2.calibrateCamera(objpoints, imgpoints_r, shape_r, None, None)
+print(f"RMS individual: cam0 = {ret1:.3f} px   cam1 = {ret2:.3f} px")
 
 print("Calibrando estéreo...")
 criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.0001)
@@ -104,7 +136,41 @@ ret, mtx1, dist1, mtx2, dist2, R, T, E, F = cv2.stereoCalibrate(
     objpoints, imgpoints_l, imgpoints_r, mtx1, dist1, mtx2, dist2, shape_l,
     criteria=criteria, flags=flags)
 
-# Guardar archivo .npz
+# Guardar archivo .npz solo si pasa el rechazo duro.
+baseline = float(np.linalg.norm(T))
+rot = float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
+motivos = []
+if ret1 > 2.0 or ret2 > 2.0:
+    motivos.append(f"RMS individual alto (cam0 {ret1:.2f} / cam1 {ret2:.2f}, max 2.0). "
+                   "QUE HICISTE MAL: tablero movido o poca luz. Recaptura quieto.")
+if ret > 1.5:
+    motivos.append(f"RMS estereo alto ({ret:.2f}, max 1.5). "
+                   "QUE HICISTE MAL: faltan angulos variados. Inclina el charuco en todas direcciones.")
+for nombre, mtx, forma in (("cam0", mtx1, shape_l), ("cam1", mtx2, shape_r)):
+    fov = fov_grados(mtx[0, 0], forma[0])
+    bajo, alto = RANGO_FOV_CREIBLE
+    if not (bajo < fov < alto):
+        motivos.append(f"FOV {nombre} implausible ({fov:.0f}). "
+                       "QUE HICISTE MAL: charuco muy chico o muy cerca.")
+if not (50.0 <= baseline <= 1500.0):
+    motivos.append(f"Separacion rara ({baseline:.0f} mm). QUE HICISTE MAL: pares no sincronizados.")
+if rot > 10.0:
+    motivos.append(f"Camaras muy giradas ({rot:.1f}, max 10). QUE HICISTE MAL: ponlas paralelas.")
+if len(objpoints) < 15:
+    motivos.append(f"Pocos pares ({len(objpoints)}, quiero 15+). QUE HICISTE MAL: charuco no visto en ambas.")
+if motivos:
+    txt = "CALIBRACION RECHAZADA:\n" + "\n".join(f"- {m}" for m in motivos)
+    print("\n" + txt)
+    try:
+        with open(os.path.join(CARPETA_CALIBRACION, "ultimo_rechazo.txt"), "w", encoding="utf-8") as f:
+            f.write(txt + "\n")
+    except OSError:
+        pass
+    sys.exit(2)
+try:
+    os.remove(os.path.join(CARPETA_CALIBRACION, "ultimo_rechazo.txt"))
+except OSError:
+    pass
 np.savez(ARCHIVO_FINAL, mtx1=mtx1, dist1=dist1, mtx2=mtx2, dist2=dist2, R=R, T=T)
 print(f"Guardado: {ARCHIVO_FINAL}")
 

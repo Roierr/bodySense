@@ -1,11 +1,21 @@
 import cv2
 import numpy as np
 import os
+import sys
 import time
 
-from Herramientas import (BACKEND_CAMARA, CARPETA_CAPTURAS, CHECKERBOARD,
+from utils.Herramientas import (BACKEND_CAMARA, CARPETA_CAPTURAS, CHECKERBOARD,
                           INTERVALO_SEGUNDOS, MIN_ANCHO_TABLERO, TOTAL_FOTOS,
-                          detectar_tablero, tamano_relativo)
+                          crear_charuco, detectar_charuco, detectar_tablero,
+                          tamano_relativo)
+
+MODE = sys.argv[1].lower() if len(sys.argv) > 1 else "ajedrez"
+if MODE.startswith("charu"):
+    MODE = "charuco"
+    _, charuco_detector = crear_charuco()
+else:
+    MODE = "ajedrez"
+    charuco_detector = None
 
 # === CONFIGURACIÓN ===
 # Todo esto sale de Herramientas.py, que lo lee de config.json: el tablero, el
@@ -16,14 +26,24 @@ if not os.path.exists(CARPETA_GUARDADO):
     os.makedirs(CARPETA_GUARDADO)
     print(f"✅ Carpeta de fotos creada en: {CARPETA_GUARDADO}")
 
-cap0 = cv2.VideoCapture(1, BACKEND_CAMARA)
-cap1 = cv2.VideoCapture(2, BACKEND_CAMARA)
+# Estereo real: dos indices distintos (0 y 1). Abrir dos veces el mismo
+# indice duplica la imagen y la calibracion sale con R/T falsos.
+cap0 = cv2.VideoCapture(0, BACKEND_CAMARA)
+cap1 = cv2.VideoCapture(1, BACKEND_CAMARA)
 
 if not cap0.isOpened() or not cap1.isOpened():
     print("❌ Error: No se detectan las cámaras.")
     exit()
 
-print(f"--- MODO CAPTURA ---")
+# Ajuste conservador para que la camara abra con imagen visible. Los ajustes
+# agresivos pueden dejarla negra o gris en este driver.
+cap0.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)
+cap0.set(cv2.CAP_PROP_EXPOSURE, -4.0)
+cap1.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1.0)
+cap1.set(cv2.CAP_PROP_EXPOSURE, -4.0)
+print("Ajustes camara: auto_exposure=1.0, exposure=-4.0")
+
+print(f"--- MODO CAPTURA [{MODE}] ---")
 print(f"Guardando en: {CARPETA_GUARDADO}")
 
 contador = 0
@@ -41,11 +61,21 @@ while contador < TOTAL_FOTOS:
     gray0 = cv2.cvtColor(frame0, cv2.COLOR_BGR2GRAY)
     gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
 
-    found0, corners0 = detectar_tablero(gray0)
-    found1, corners1 = detectar_tablero(gray1)
+    if MODE == "charuco":
+        found0, corners0, _ = detectar_charuco(gray0, charuco_detector)
+        found1, corners1, _ = detectar_charuco(gray1, charuco_detector)
+        if found0:
+            for c in corners0.reshape(-1, 2):
+                cv2.circle(show0, tuple(map(int, c)), 4, (0, 255, 0), -1)
+        if found1:
+            for c in corners1.reshape(-1, 2):
+                cv2.circle(show1, tuple(map(int, c)), 4, (0, 255, 0), -1)
+    else:
+        found0, corners0 = detectar_tablero(gray0)
+        found1, corners1 = detectar_tablero(gray1)
 
-    if found0: cv2.drawChessboardCorners(show0, CHECKERBOARD, corners0, found0)
-    if found1: cv2.drawChessboardCorners(show1, CHECKERBOARD, corners1, found1)
+        if found0: cv2.drawChessboardCorners(show0, CHECKERBOARD, corners0, found0)
+        if found1: cv2.drawChessboardCorners(show1, CHECKERBOARD, corners1, found1)
 
     # Que tan grande se ve el tablero en cada camara
     ancho0 = tamano_relativo(corners0, frame0.shape) if found0 else 0.0
